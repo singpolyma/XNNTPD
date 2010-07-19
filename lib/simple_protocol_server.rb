@@ -40,7 +40,10 @@ class SimpleProtocolServer < EventMachine::Connection
 
 	# Called with the return value of each command
 	def callback(rtrn)
-		send_data(rtrn.to_s) if rtrn
+		if rtrn
+			rtrn = rtrn.join("\r\n") + "\r\n." if rtrn.respond_to?:join
+			send_data(rtrn.to_s + "\r\n")
+		end
 	end
 
 end
