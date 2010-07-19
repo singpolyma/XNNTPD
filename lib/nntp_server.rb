@@ -31,8 +31,12 @@ class NNTPServer < SimpleProtocolServer
 	# http://tools.ietf.org/html/rfc3977#section-5.1
 	def post_init
 		super
+		send_data "#{banner}\r\n"
+	end
+
+	def banner
 		# 200 allowed, 201 prohibited, 400 temporary, 502 permanent
-		send_data "200 Service available, posting allowed\r\n"
+		'200 Service available, posting allowed'
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-7.2
