@@ -16,6 +16,7 @@ class NNTPServer < SimpleProtocolServer
 	def commands
 		{
 			/^capabilities/i => method(:capabilities),
+			/^mode reader/i  => lambda {|d| banner}, # http://tools.ietf.org/html/rfc3977#section-5.3
 			/^quit/i         => method(:quit),
 			/^help$/i => method(:help),
 			/^date$/i => method(:date),
