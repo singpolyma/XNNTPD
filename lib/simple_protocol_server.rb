@@ -15,6 +15,10 @@ class SimpleProtocolServer < EventMachine::Connection
 		@multiline = false
 	end
 
+	def mkdefer(*args, &blk)
+		EventMachine::defer lambda { blk.call(*args) }, method(:callback)
+	end
+
 	def receive_data(data)
 		data.force_encoding('binary').each_char { |c| # Make no assumptions about the data
 			@buffer += c
@@ -29,7 +33,7 @@ class SimpleProtocolServer < EventMachine::Connection
 				@buffer.chomp!
 				commands.each do |pattern, block|
 					if pattern === @buffer # If this command matches, defer its block
-						EventMachine::defer lambda { block.call(@buffer.gsub(pattern, '')) }, method(:callback)
+						mkdefer(@buffer.gsub(pattern, '')) { |buf| block.call(buf) }
 						break # Only match one command
 					end
 				end
