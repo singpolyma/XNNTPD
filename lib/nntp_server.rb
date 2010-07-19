@@ -22,17 +22,17 @@ class NNTPServer < SimpleProtocolServer
 			/^mode reader/i  => lambda {|d| banner}, # http://tools.ietf.org/html/rfc3977#section-5.3
 			/^quit/i         => method(:quit),
 			/^group\s+/i     => method(:group),
-			/^listgroup/i    => method(:listgroup),
+			/^listgroup\s*/i => method(:listgroup),
 			/^last/i         => method(:last),
 			/^next/i         => method(:next),
-			/^article/i      => method(:article),
-			/^head/i         => method(:head),
-			/^body/i         => method(:body),
-			/^stat/i         => method(:stat),
+			/^article\s*/i   => method(:article),
+			/^head\s*/i      => method(:head),
+			/^body\s*/i      => method(:body),
+			/^stat\s*/i      => method(:stat),
 			/^post/i         => method(:post),
-			/^ihave/i        => method(:ihave),
-			/^help/i         => method(:help),
+			/^ihave\s*/i     => method(:ihave),
 			/^date/i         => method(:date),
+			/^help/i         => method(:help),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
 			/.*/             => lambda {|d| "500 Command not recognized" } # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		}
