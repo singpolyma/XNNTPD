@@ -14,12 +14,13 @@ class NNTPServer < SimpleProtocolServer
 	OVERVIEW_FMT = ['subject', 'from', 'date', 'message-id', 'references', :bytes, :lines]
 
 	def commands
-		super.merge!({
+		{
+			/^quit/i         => method(:quit),
 			/^help$/i => method(:help),
 			/^date$/i => method(:date),
 			/^group\s+/ => method(:group),
 			/^x?over\s*/ => method(:over) # Allow XOVER for historical reasons
-		})
+		}
 	end
 
 	def backend
@@ -32,6 +33,13 @@ class NNTPServer < SimpleProtocolServer
 	def post_init
 		super
 		send_data "#{banner}\r\n"
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-5.4
+	def quit(data)
+		return '501 QUIT takes no arguments' if data.to_s != '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		send_data "205 Connection closing\r\n"
+		close_connection_after_writing
 	end
 
 	def banner
