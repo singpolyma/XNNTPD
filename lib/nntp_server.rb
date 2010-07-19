@@ -29,6 +29,7 @@ class NNTPServer < SimpleProtocolServer
 			/^head/i         => method(:head),
 			/^body/i         => method(:body),
 			/^stat/i         => method(:stat),
+			/^post/i         => method(:post),
 			/^help/i         => method(:help),
 			/^date/i         => method(:date),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
@@ -59,7 +60,8 @@ class NNTPServer < SimpleProtocolServer
 
 	# http://tools.ietf.org/html/rfc3977#section-5.2
 	def capabilities(data)
-		['101 Capability list follows (multi-line)', 'VERSION 2', 'IMPLEMENTATION XNNTP', 'READER', 'OVER MSGID']
+		c = ['101 Capability list follows (multi-line)', 'VERSION 2', 'IMPLEMENTATION XNNTP', 'READER', 'OVER MSGID']
+		c << 'POST' unless readonly?
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-5.4
@@ -153,6 +155,40 @@ class NNTPServer < SimpleProtocolServer
 			return rtrn
 		end
 		["223 #{rtrn[:article_num]} #{rtrn[:head][:message_id]}"]
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-6.3.1
+	def post(data)
+		return '440 Posting not permitted' if readonly?
+		@multiline = lambda {|data|
+			head, body = data.split(/\r\n\r\n/, 2)
+			# Headers are specced to be UTF-8, body may be different based on MIME
+			headers = []
+			head.force_encoding('utf-8').split(/\r\n/).each {|line|
+				if line[0] =~ /\s/ && headers.last # folded header
+					headers.last[1] += line
+				else
+					line = line.split(/:\s*/, 2)
+					line[0] = line.first.downcase.gsub(/-/, '_').intern
+					headers << line
+				end
+			}
+			headers = Hash[headers] # Convert to hash (was array for ordering for folding)
+			body.to_s.gsub!(/\r\n../, "\r\n.")
+			return '441 Posting failed' unless headers[:newsgroup].to_s != ''
+			success = false
+			# We can have multiple backends, up to one per group, send to them all
+			headers[:newsgroup].split(/,\s*/).each {|group|
+				success ||= backend(group).post(:head => headers, :body => body)
+			}
+			# We succeeded if any backend did
+			if success
+				'240 Article received OK'
+			else
+				'441 Posting failed'
+			end
+		}
+		'340 Send article to be posted'
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-7.2
