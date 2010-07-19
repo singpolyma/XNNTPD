@@ -30,6 +30,7 @@ class NNTPServer < SimpleProtocolServer
 			/^body/i         => method(:body),
 			/^stat/i         => method(:stat),
 			/^post/i         => method(:post),
+			/^ihave/i        => method(:ihave),
 			/^help/i         => method(:help),
 			/^date/i         => method(:date),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
@@ -161,20 +162,7 @@ class NNTPServer < SimpleProtocolServer
 	def post(data)
 		return '440 Posting not permitted' if readonly?
 		@multiline = lambda {|data|
-			head, body = data.split(/\r\n\r\n/, 2)
-			# Headers are specced to be UTF-8, body may be different based on MIME
-			headers = []
-			head.force_encoding('utf-8').split(/\r\n/).each {|line|
-				if line[0] =~ /\s/ && headers.last # folded header
-					headers.last[1] += line
-				else
-					line = line.split(/:\s*/, 2)
-					line[0] = line.first.downcase.gsub(/-/, '_').intern
-					headers << line
-				end
-			}
-			headers = Hash[headers] # Convert to hash (was array for ordering for folding)
-			body.to_s.gsub!(/\r\n../, "\r\n.")
+			head, body = parse_message(data)
 			return '441 Posting failed' unless headers[:newsgroup].to_s != ''
 			success = false
 			# We can have multiple backends, up to one per group, send to them all
@@ -189,6 +177,32 @@ class NNTPServer < SimpleProtocolServer
 			end
 		}
 		'340 Send article to be posted'
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-6.3.2
+	def ihave(data)
+		return '501 Please pass the message-id' if data.to_s == '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		return '436 Posting not permitted' if readonly?
+		# Must check all backends for message-id
+		if BACKENDS.inject(false) {|c, backend| c || backend.exists?(data) }
+			return '435 Article not wanted'
+		end
+		@multiline = lambda {|data|
+			head, body = parse_message(data)
+			return '437 No Newsgroup header' unless headers[:newsgroup].to_s != ''
+			success = false
+			# We can have multiple backends, up to one per group, send to them all
+			headers[:newsgroup].split(/,\s*/).each {|group|
+				success ||= backend(group).ihave(:head => headers, :body => body)
+			}
+			# We succeeded if any backend did
+			if success
+				'235 Article transferred OK'
+			else
+				'437 Transfer rejected; do not try again'
+			end
+		}
+		'335 Send article to be transferred'
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-7.2
@@ -244,6 +258,24 @@ class NNTPServer < SimpleProtocolServer
 			end
 		end
 		rtrn
+	end
+
+	def parse_message(data)
+		head, body = data.split(/\r\n\r\n/, 2)
+		# Headers are specced to be UTF-8, body may be different based on MIME
+		headers = []
+		head.force_encoding('utf-8').split(/\r\n/).each {|line|
+			if line[0] =~ /\s/ && headers.last # folded header
+				headers.last[1] += line
+			else
+				line = line.split(/:\s*/, 2)
+				line[0] = line.first.downcase.gsub(/-/, '_').intern
+				headers << line
+			end
+		}
+		headers = Hash[headers] # Convert to hash (was array for ordering for folding)
+		body.to_s.gsub!(/\r\n../, "\r\n.")
+		[headers, body]
 	end
 
 	def parse_range(string)
