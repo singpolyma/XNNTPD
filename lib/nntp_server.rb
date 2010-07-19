@@ -33,9 +33,9 @@ class NNTPServer < SimpleProtocolServer
 		}
 	end
 
-	def backend
+	def backend(group=@current_group.to_s)
 		BACKENDS.each do |pattern, backend|
-			return backend if pattern === @current_group.to_s
+			return backend if pattern === group
 		end
 	end
 
@@ -66,7 +66,7 @@ class NNTPServer < SimpleProtocolServer
 	def group(data)
 		return '501 Plase pass a group to select' unless data # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		@current_group = nil
-		if (meta = backend.group(data))
+		if (meta = backend(data).group(data))
 			@current_group = data
 			"211 #{meta[:total]} #{meta[:min]} #{meta[:max]} #{@current_group}"
 		else
@@ -78,10 +78,11 @@ class NNTPServer < SimpleProtocolServer
 	def listgroup(data)
 		group, range = data.split(/\s+/, 2)
 		return '412 No newsgroup selected' unless group.to_s != '' || @current_group
-		status = group(group.to_s == '' ? @current_group : group)
+		group = group.to_s == '' ? @current_group : group
+		status = self.group(group)
 		return status if status.split(' ',2).first != '211'
 		range = range.to_s == '' ? nil : parse_range(range)
-		[status] + backend.listgroup(range)
+		[status] + backend(group).listgroup(range)
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.1.3
