@@ -36,6 +36,7 @@ class NNTPServer < SimpleProtocolServer
 			/^help/i         => method(:help),
 			/^newgroups\s*/i => method(:newgroups),
 			/^newnews\s*/i   => method(:newnews),
+			/^list overview\.fmt/i => method(:list_overview_fmt),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
 			/.*/             => lambda {|d| "500 Command not recognized" } # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		}
@@ -64,7 +65,9 @@ class NNTPServer < SimpleProtocolServer
 
 	# http://tools.ietf.org/html/rfc3977#section-5.2
 	def capabilities(data)
-		c = ['101 Capability list follows (multi-line)', 'VERSION 2', 'IMPLEMENTATION XNNTP', 'READER', 'OVER MSGID']
+		c = ['101 Capability list follows (multi-line)', 'VERSION 2',
+		     'IMPLEMENTATION XNNTP', 'READER', 'OVER MSGID', 'NEWNEWS',
+		     'LIST OVERVIEW.FMT']
 		c << 'POST' << 'IHAVE' unless readonly?
 	end
 
@@ -163,7 +166,6 @@ class NNTPServer < SimpleProtocolServer
 
 	# http://tools.ietf.org/html/rfc3977#section-6.3.1
 	def post(data)
-p data
 		return '440 Posting not permitted' if readonly?
 		@multiline = lambda {|data|
 			head, body = parse_message(data)
@@ -242,6 +244,19 @@ p data
 		['230 List of new articles follows (multi-line)'] +
 		BACKENDS.inject([]) { |c, backend|
 			c + backend.newnews(wildmats, datetime)
+		}
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-8.4
+	def list_overview_fmt(data)
+		['215 Order of fields from OVER command'] +
+		OVERVIEW_FMT.map {|i| i.inspect.capitalize } +
+		backend.overview_fmt.map {|i|
+			if i.is_a?String
+				i.capitalize.gsub(/_/, '-') + ':full'
+			else
+				i.inspect
+			end
 		}
 	end
 
