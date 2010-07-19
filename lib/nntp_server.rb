@@ -18,6 +18,7 @@ class NNTPServer < SimpleProtocolServer
 			/^capabilities/i => method(:capabilities),
 			/^mode reader/i  => lambda {|d| banner}, # http://tools.ietf.org/html/rfc3977#section-5.3
 			/^quit/i         => method(:quit),
+			/^listgroup/i    => method(:listgroup),
 			/^help$/i => method(:help),
 			/^date$/i => method(:date),
 			/^group\s+/ => method(:group),
@@ -47,6 +48,16 @@ class NNTPServer < SimpleProtocolServer
 		return '501 QUIT takes no arguments' if data.to_s != '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		send_data "205 Connection closing\r\n"
 		close_connection_after_writing
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-6.1.2
+	def listgroup(data)
+		group, range = data.split(/\s+/, 2)
+		return '412 No newsgroup selected' unless group.to_s != '' || @current_group
+		status = group(group.to_s == '' ? @current_group : group)
+		return status if status.split(' ',2).first != '211'
+		range = range.to_s == '' ? nil : parse_range(range)
+		[status] + backend.listgroup(range)
 	end
 
 	def banner
