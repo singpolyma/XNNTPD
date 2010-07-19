@@ -23,7 +23,8 @@ class NNTPServer < SimpleProtocolServer
 			/^help$/i => method(:help),
 			/^date$/i => method(:date),
 			/^group\s+/ => method(:group),
-			/^x?over\s*/ => method(:over) # Allow XOVER for historical reasons
+			/^x?over\s*/ => method(:over), # Allow XOVER for historical reasons
+			/.*/             => lambda {|d| "500 Command not recognized" } # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		}
 	end
 
