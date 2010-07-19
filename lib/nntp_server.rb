@@ -21,6 +21,7 @@ class NNTPServer < SimpleProtocolServer
 			/^group\s+/i     => method(:group),
 			/^listgroup/i    => method(:listgroup),
 			/^last/i         => method(:last),
+			/^next/i         => method(:next),
 			/^help/i         => method(:help),
 			/^date/i         => method(:date),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
@@ -86,6 +87,19 @@ class NNTPServer < SimpleProtocolServer
 		return '412 No newsgroup selected' unless @current_group
 		return '420 Current article number is invalid' unless @current_article
 		if (rtrn = backend.last)
+			@current_article = rtrn[:article_num]
+			"223 #{rtrn[:article_num]} #{rtrn[:message_id]}"
+		else
+			'422 No previous article in this group'
+		end
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-6.1.4
+	def next(data)
+		return '501 LAST takes no arguments' if data # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		return '412 No newsgroup selected' unless @current_group
+		return '420 Current article number is invalid' unless @current_article
+		if (rtrn = backend.next)
 			@current_article = rtrn[:article_num]
 			"223 #{rtrn[:article_num]} #{rtrn[:message_id]}"
 		else
