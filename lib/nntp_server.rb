@@ -19,6 +19,7 @@ class NNTPServer < SimpleProtocolServer
 			/^mode reader/i  => lambda {|d| banner}, # http://tools.ietf.org/html/rfc3977#section-5.3
 			/^quit/i         => method(:quit),
 			/^listgroup/i    => method(:listgroup),
+			/^last/i         => method(:last),
 			/^help$/i => method(:help),
 			/^date$/i => method(:date),
 			/^group\s+/ => method(:group),
@@ -58,6 +59,20 @@ class NNTPServer < SimpleProtocolServer
 		return status if status.split(' ',2).first != '211'
 		range = range.to_s == '' ? nil : parse_range(range)
 		[status] + backend.listgroup(range)
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-6.1.3
+	# LAST means previous
+	def last(data)
+		return '501 LAST takes no arguments' if data # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		return '412 No newsgroup selected' unless @current_group
+		return '420 Current article number is invalid' unless @current_article
+		if (rtrn = backend.last)
+			@current_article = rtrn[:article_num]
+			"223 #{rtrn[:article_num]} #{rtrn[:message_id]}"
+		else
+			'422 No previous article in this group'
+		end
 	end
 
 	def banner
