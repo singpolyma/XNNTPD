@@ -39,6 +39,7 @@ class NNTPServer < SimpleProtocolServer
 			/^list active\s*/=> method(:list_active),
 			/^list newsgroups\s*/ => method(:list_newsgroups),
 			/^list overview\.fmt/i => method(:list_overview_fmt),
+			/^list headers/i => method(:list_headers),
 			/^list\s*/       => method(:list_active),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
 			/^x?hdr\s*/      => method(:hdr), # Allow XHDR for historical reasons
@@ -71,7 +72,7 @@ class NNTPServer < SimpleProtocolServer
 	def capabilities(data)
 		c = ['101 Capability list follows (multi-line)', 'VERSION 2',
 		     'IMPLEMENTATION XNNTP', 'READER', 'OVER MSGID', 'NEWNEWS', 'HDR',
-		     'LIST ACTIVE NEWSGROUPS OVERVIEW.FMT']
+		     'LIST ACTIVE NEWSGROUPS OVERVIEW.FMT HEADERS']
 		c << 'POST' << 'IHAVE' unless readonly?
 	end
 
@@ -282,6 +283,11 @@ class NNTPServer < SimpleProtocolServer
 				i.inspect
 			end
 		}
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-8.6
+	def list_headers(data)
+		['215 Field list follows (multi-line)', ':', ':bytes', ':lines']
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-8.3
