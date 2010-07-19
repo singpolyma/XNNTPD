@@ -18,12 +18,12 @@ class NNTPServer < SimpleProtocolServer
 			/^capabilities/i => method(:capabilities),
 			/^mode reader/i  => lambda {|d| banner}, # http://tools.ietf.org/html/rfc3977#section-5.3
 			/^quit/i         => method(:quit),
+			/^group\s+/i     => method(:group),
 			/^listgroup/i    => method(:listgroup),
 			/^last/i         => method(:last),
-			/^help$/i => method(:help),
-			/^date$/i => method(:date),
-			/^group\s+/ => method(:group),
-			/^x?over\s*/ => method(:over), # Allow XOVER for historical reasons
+			/^help/i         => method(:help),
+			/^date/i         => method(:date),
+			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
 			/.*/             => lambda {|d| "500 Command not recognized" } # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		}
 	end
@@ -40,6 +40,11 @@ class NNTPServer < SimpleProtocolServer
 		send_data "#{banner}\r\n"
 	end
 
+	def banner
+		# 200 allowed, 201 prohibited, 400 temporary, 502 permanent
+		'200 Service available, posting allowed'
+	end
+
 	# http://tools.ietf.org/html/rfc3977#section-5.2
 	def capabilities(data)
 		['101 Capability list follows (multi-line)', 'VERSION 2', 'IMPLEMENTATION XNNTP', 'READER', 'OVER MSGID']
@@ -50,6 +55,18 @@ class NNTPServer < SimpleProtocolServer
 		return '501 QUIT takes no arguments' if data.to_s != '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		send_data "205 Connection closing\r\n"
 		close_connection_after_writing
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-6.1.1
+	def group(data)
+		return '501 Plase pass a group to select' unless data # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		@current_group = nil
+		if (meta = backend.group(data))
+			@current_group = data
+			"211 #{meta[:total]} #{meta[:min]} #{meta[:max]} #{@current_group}"
+		else
+			'411 Group does not exist'
+		end
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.1.2
@@ -76,11 +93,6 @@ class NNTPServer < SimpleProtocolServer
 		end
 	end
 
-	def banner
-		# 200 allowed, 201 prohibited, 400 temporary, 502 permanent
-		'200 Service available, posting allowed'
-	end
-
 	# http://tools.ietf.org/html/rfc3977#section-7.2
 	def help(data)
 		['100 Help text follows (multi-line)'] +
@@ -90,17 +102,6 @@ class NNTPServer < SimpleProtocolServer
 	# http://tools.ietf.org/html/rfc3977#section-7.1
 	def date(data)
 		'111 ' + Time.now.utc.strftime('%Y%m%d%H%M%S') + ' Server date and time'
-	end
-
-	def group(data)
-		return '501 Plase pass a group to select' unless data # http://tools.ietf.org/html/rfc3977#section-3.2.1
-		@current_group = nil
-		if (meta = backend.group(data))
-			@current_group = data
-			"211 #{meta[:total]} #{meta[:min]} #{meta[:max]} #{@current_group}"
-		else
-			'411 Group does not exist'
-		end
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-8.3
