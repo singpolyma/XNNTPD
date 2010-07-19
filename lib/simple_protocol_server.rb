@@ -19,7 +19,7 @@ class SimpleProtocolServer < EventMachine::Connection
 		data.force_encoding('binary').each_char { |c| # Make no assumptions about the data
 			@buffer += c
 			if @multiline
-				if @buffer[-5..-1] == "\r\n.\r\n"
+				if @buffer[-5..-1] == "\r\n.\r\n" || @buffer[-3..-1] == ".\r\n"
 					# XXX: Not using defer because the data fails to get through that way
 					callback(@multiline.call(@buffer.gsub(/\r?\n?\.\r\n$/, '')))
 					@multiline = false
