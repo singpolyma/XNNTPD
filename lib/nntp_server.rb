@@ -15,6 +15,7 @@ class NNTPServer < SimpleProtocolServer
 
 	def commands
 		{
+			/^capabilities/i => method(:capabilities),
 			/^quit/i         => method(:quit),
 			/^help$/i => method(:help),
 			/^date$/i => method(:date),
@@ -33,6 +34,11 @@ class NNTPServer < SimpleProtocolServer
 	def post_init
 		super
 		send_data "#{banner}\r\n"
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-5.2
+	def capabilities(data)
+		['101 Capability list follows (multi-line)', 'VERSION 2', 'IMPLEMENTATION XNNTP', 'READER', 'OVER MSGID']
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-5.4
