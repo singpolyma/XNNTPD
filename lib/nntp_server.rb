@@ -223,18 +223,24 @@ p data
 	def newgroups(data)
 		date, time, gmt = data.split(/\s+/, 3)
 		return '501 Use: yyyymmdd hhmmss' if date.to_s == '' || time.to_s == '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
-		if date.length <= 6 # 2-digit year
-			if date[0..1].to_i <= Time.now.year.to_s[2..-1].to_i
-				date = Time.now.year.to_s[0..1] + date
-			else
-				date = (Time.now.year.to_s[0..1].to_i - 1).to_s + date
-			end
-		end
-		datetime = Time.parse(date + ' ' + time + '+0000').utc # Always assume UTC
+		datetime = parse_date(date, time)
 		# Get new groups from all backends
 		['231 List of new groups follows (multi-line)'] +
 		BACKENDS.inject([]) { |c, backend|
 			c + backend.newgroups(datetime)
+		}
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-7.4
+	def newnews(data)
+		wildmats, date, time, gmt = data.split(/\s+/, 4)
+		return '501 Use: yyyymmdd hhmmss' if date.to_s == '' || time.to_s == '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		datetime = parse_date(date, time)
+		# Get new news from all backends
+		# TODO: can we match the passed wildmats against backend patterns and only ask relevant backends?
+		['230 List of new articles follows (multi-line)'] +
+		BACKENDS.inject([]) { |c, backend|
+			c + backend.newnews(wildmats, datetime)
 		}
 	end
 
@@ -298,6 +304,17 @@ p data
 		headers = Hash[headers] # Convert to hash (was array for ordering for folding)
 		body.to_s.gsub!(/\r\n../, "\r\n.")
 		[headers, body]
+	end
+
+	def parse_date(date, time)
+		if date.length <= 6 # 2-digit year
+			if date[0..1].to_i <= Time.now.year.to_s[2..-1].to_i
+				date = Time.now.year.to_s[0..1] + date
+			else
+				date = (Time.now.year.to_s[0..1].to_i - 1).to_s + date
+			end
+		end
+		Time.parse(date + ' ' + time + '+0000').utc # Always assume UTC
 	end
 
 	def parse_range(string)
