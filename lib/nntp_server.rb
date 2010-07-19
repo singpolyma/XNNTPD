@@ -37,6 +37,7 @@ class NNTPServer < SimpleProtocolServer
 			/^newgroups\s*/i => method(:newgroups),
 			/^newnews\s*/i   => method(:newnews),
 			/^list active\s*/=> method(:list_active),
+			/^list newsgroups\s*/ => method(:list_newsgroups),
 			/^list overview\.fmt/i => method(:list_overview_fmt),
 			/^list\s*/       => method(:list_active),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
@@ -69,7 +70,7 @@ class NNTPServer < SimpleProtocolServer
 	def capabilities(data)
 		c = ['101 Capability list follows (multi-line)', 'VERSION 2',
 		     'IMPLEMENTATION XNNTP', 'READER', 'OVER MSGID', 'NEWNEWS',
-		     'LIST ACTIVE OVERVIEW.FMT']
+		     'LIST ACTIVE NEWSGROUPS OVERVIEW.FMT']
 		c << 'POST' << 'IHAVE' unless readonly?
 	end
 
@@ -255,6 +256,16 @@ class NNTPServer < SimpleProtocolServer
 		BACKENDS.inject([]) {|c, backend|
 			c + backend.list(data).map {|group|
 				"#{group[:group]} #{group[:max]} #{group[:min]} #{group[:readonly] ? 'n' : (group[:moderated] ? 'm' : 'y')}"
+			}
+		}
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-7.6.6
+	def list_newsgroups(data)
+		['215 List of groups follows (multi-line)'] +
+		BACKENDS.inject([]) {|c, backend|
+			c + backend.list(data).map {|group|
+				"#{group[:group]}\t#{group[:title]}"
 			}
 		}
 	end
