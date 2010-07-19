@@ -1,0 +1,10 @@
+= eXtensible NNTP Daemon (Server) =
+
+This project aims to build a general-purpose, modular, and extendible NNTP server in Ruby.
+
+This server will conform strictly to at least RFC3977.  Provided backends will conform to RFC5536 and RFC5537.
+
+== Dependencies ==
+
+* EventMachine
+* Daemons (only if you want to daemonize)
