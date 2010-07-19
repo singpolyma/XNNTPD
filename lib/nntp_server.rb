@@ -22,6 +22,10 @@ class NNTPServer < SimpleProtocolServer
 			/^listgroup/i    => method(:listgroup),
 			/^last/i         => method(:last),
 			/^next/i         => method(:next),
+			/^article/i      => method(:article),
+			/^head/i         => method(:head),
+			/^body/i         => method(:body),
+			/^stat/i         => method(:stat),
 			/^help/i         => method(:help),
 			/^date/i         => method(:date),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
@@ -107,6 +111,42 @@ class NNTPServer < SimpleProtocolServer
 		end
 	end
 
+	# http://tools.ietf.org/html/rfc3977#section-6.2.1
+	def article(data)
+		if (rtrn = article_part(data, backend.method(:article))).is_a?String
+			return rtrn
+		end
+		["220 #{rtrn[:article_num]} #{rtrn[:head][:message_id]} Article follows (multi-line)"] +
+		rtrn[:head].map {|k,v| "#{k.capitalize}: #{v}" } + [''] +
+		rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-6.2.2
+	def head(data)
+		if (rtrn = article_part(data, backend.method(:head))).is_a?String
+			return rtrn
+		end
+		["221 #{rtrn[:article_num]} #{rtrn[:head][:message_id]} Headers follow (multi-line)"] +
+		rtrn[:head].map {|k,v| "#{k.capitalize}: #{v}" }
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-6.2.3
+	def body(data)
+		if (rtrn = article_part(data, backend.method(:body))).is_a?String
+			return rtrn
+		end
+		["222 #{rtrn[:article_num]} #{rtrn[:head][:message_id]} Body follows (multi-line)"] +
+		rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
+	end
+
+	# http://tools.ietf.org/html/rfc3977#section-6.2.4
+	def stat(data)
+		if (rtrn = article_part(data, backend.method(:stat))).is_a?String
+			return rtrn
+		end
+		["223 #{rtrn[:article_num]} #{rtrn[:head][:message_id]}"]
+	end
+
 	# http://tools.ietf.org/html/rfc3977#section-7.2
 	def help(data)
 		['100 Help text follows (multi-line)'] +
@@ -146,6 +186,22 @@ class NNTPServer < SimpleProtocolServer
 	end
 
 	protected
+	def article_part(data, method)
+		if data[0] != '<' && !data.index('@') # Message ID
+			unless (rtrn = method.cal(:message_id => data))
+				return '430 No article with that message-id'
+			end
+		else
+			return '412 No newsgroup selected' unless @current_group
+			data = @current_article if data.to_s == ''
+			return '420 Current article number is invalid' if data.to_s == ''
+			unless (rtrn = method.call(:article_num => data.to_i))
+				return '423 No article with that number'
+			end
+		end
+		rtrn
+	end
+
 	def parse_range(string)
 		return string.to_i unless string.index('-')
 		min, max = data.split(/-/, 2)
