@@ -9,6 +9,9 @@ class NNTPServer < SimpleProtocolServer
 		@current_group = nil
 		@current_article = nil
 	end
+	def self.readonly=(v); @readonly = v; end
+	def self.readonly?; @readonly; end
+	def readonly?; self.class.readonly?; end
 
 	# Mandatory start to LIST OVERVIEW.FMT from http://tools.ietf.org/html/rfc3977#section-8.4
 	OVERVIEW_FMT = ['subject', 'from', 'date', 'message-id', 'references', :bytes, :lines]
@@ -47,7 +50,11 @@ class NNTPServer < SimpleProtocolServer
 
 	def banner
 		# 200 allowed, 201 prohibited, 400 temporary, 502 permanent
-		'200 Service available, posting allowed'
+		if self.readonly?
+			'201 Service available, posting prohibited'
+		else
+			'200 Service available, posting allowed'
+		end
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-5.2
