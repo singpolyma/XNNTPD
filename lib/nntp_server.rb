@@ -35,6 +35,7 @@ class NNTPServer < SimpleProtocolServer
 			/^date/i         => method(:date),
 			/^help/i         => method(:help),
 			/^newgroups\s*/i => method(:newgroups),
+			/^newnews\s*/i   => method(:newnews),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
 			/.*/             => lambda {|d| "500 Command not recognized" } # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		}
@@ -64,7 +65,7 @@ class NNTPServer < SimpleProtocolServer
 	# http://tools.ietf.org/html/rfc3977#section-5.2
 	def capabilities(data)
 		c = ['101 Capability list follows (multi-line)', 'VERSION 2', 'IMPLEMENTATION XNNTP', 'READER', 'OVER MSGID']
-		c << 'POST' unless readonly?
+		c << 'POST' << 'IHAVE' unless readonly?
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-5.4
