@@ -71,9 +71,7 @@ class NNTPServer < SimpleProtocolServer
 			end
 		elsif data.index('-') # Range
 			return '412 No newsgroup selected' unless @current_group
-			min, max = data.split(/-/, 2)
-			max = 1/0.0 if max == ''
-			unless (rtrn = backend.over(:range => (min.to_i..max)))
+			unless (rtrn = backend.over(:range => parse_range(data)))
 				return '423 No articles in that range'
 			end
 		else
@@ -88,5 +86,13 @@ class NNTPServer < SimpleProtocolServer
 				headers[header].force_encoding('binary') # Make no assumptions about the data
 			}.join("\t")
 		}
+	end
+
+	protected
+	def parse_range(string)
+		return string.to_i unless string.index('-')
+		min, max = data.split(/-/, 2)
+		max = 1/0.0 if max == ''
+		(min.to_i..max)
 	end
 end
