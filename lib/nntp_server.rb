@@ -160,14 +160,15 @@ class NNTPServer < SimpleProtocolServer
 
 	# http://tools.ietf.org/html/rfc3977#section-6.3.1
 	def post(data)
+p data
 		return '440 Posting not permitted' if readonly?
 		@multiline = lambda {|data|
 			head, body = parse_message(data)
-			return '441 Posting failed' unless headers[:newsgroup].to_s != ''
+			return '441 Posting failed' unless head[:newsgroup].to_s != ''
 			success = false
 			# We can have multiple backends, up to one per group, send to them all
-			headers[:newsgroup].split(/,\s*/).each {|group|
-				success ||= backend(group).post(:head => headers, :body => body)
+			head[:newsgroup].split(/,\s*/).each {|group|
+				success ||= backend(group).post(:head => head, :body => body)
 			}
 			# We succeeded if any backend did
 			if success
@@ -189,11 +190,11 @@ class NNTPServer < SimpleProtocolServer
 		end
 		@multiline = lambda {|data|
 			head, body = parse_message(data)
-			return '437 No Newsgroup header' unless headers[:newsgroup].to_s != ''
+			return '437 No Newsgroup header' unless head[:newsgroup].to_s != ''
 			success = false
 			# We can have multiple backends, up to one per group, send to them all
-			headers[:newsgroup].split(/,\s*/).each {|group|
-				success ||= backend(group).ihave(:head => headers, :body => body)
+			head[:newsgroup].split(/,\s*/).each {|group|
+				success ||= backend(group).ihave(:head => head, :body => body)
 			}
 			# We succeeded if any backend did
 			if success
