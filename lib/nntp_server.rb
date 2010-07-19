@@ -125,7 +125,7 @@ class NNTPServer < SimpleProtocolServer
 			return rtrn
 		end
 		["220 #{rtrn[:article_num]} #{rtrn[:head][:message_id]} Article follows (multi-line)"] +
-		rtrn[:head].map {|k,v| "#{k.capitalize}: #{v}" } + [''] +
+		rtrn[:head].map {|k,v| "#{k.to_s.gsub(/_/, '-').capitalize}: #{v}" } + [''] +
 		rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
 	end
 
@@ -135,7 +135,7 @@ class NNTPServer < SimpleProtocolServer
 			return rtrn
 		end
 		["221 #{rtrn[:article_num]} #{rtrn[:head][:message_id]} Headers follow (multi-line)"] +
-		rtrn[:head].map {|k,v| "#{k.capitalize}: #{v}" }
+		rtrn[:head].map {|k,v| "#{k.to_s.gsub(/_/, '-').capitalize}: #{v}" }
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.2.3
@@ -188,7 +188,7 @@ class NNTPServer < SimpleProtocolServer
 		['224 Overview information follows (multi-line)'] +
 		rtrn.map {|headers|
 			(OVERVIEW_FMT + backend.overview_fmt).map {|header|
-				headers[header].force_encoding('binary') # Make no assumptions about the data
+				headers[header.downcase.gsub(/-/,'_').intern].force_encoding('binary') # Make no assumptions about the data
 			}.join("\t")
 		}
 	end
