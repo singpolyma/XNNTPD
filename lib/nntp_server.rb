@@ -1,5 +1,6 @@
 $: << File.dirname(__FILE__)
 require 'simple_protocol_server'
+require 'time'
 
 class NNTPServer < SimpleProtocolServer
 	# Hash of pattern => object backends must be in NNTP_BACKENDS
@@ -33,6 +34,7 @@ class NNTPServer < SimpleProtocolServer
 			/^ihave\s*/i     => method(:ihave),
 			/^date/i         => method(:date),
 			/^help/i         => method(:help),
+			/^newgroups\s*/i => method(:newgroups),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
 			/.*/             => lambda {|d| "500 Command not recognized" } # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		}
@@ -206,15 +208,34 @@ p data
 		'335 Send article to be transferred'
 	end
 
+	# http://tools.ietf.org/html/rfc3977#section-7.1
+	def date(data)
+		'111 ' + Time.now.utc.strftime('%Y%m%d%H%M%S') + ' Server date and time'
+	end
+
 	# http://tools.ietf.org/html/rfc3977#section-7.2
 	def help(data)
 		['100 Help text follows (multi-line)'] +
 		commands.keys.map { |key| key.inspect }
 	end
 
-	# http://tools.ietf.org/html/rfc3977#section-7.1
-	def date(data)
-		'111 ' + Time.now.utc.strftime('%Y%m%d%H%M%S') + ' Server date and time'
+	# http://tools.ietf.org/html/rfc3977#section-7.3
+	def newgroups(data)
+		date, time, gmt = data.split(/\s+/, 3)
+		return '501 Use: yyyymmdd hhmmss' if date.to_s == '' || time.to_s == '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		if date.length <= 6 # 2-digit year
+			if date[0..1].to_i <= Time.now.year.to_s[2..-1].to_i
+				date = Time.now.year.to_s[0..1] + date
+			else
+				date = (Time.now.year.to_s[0..1].to_i - 1).to_s + date
+			end
+		end
+		datetime = Time.parse(date + ' ' + time + '+0000').utc # Always assume UTC
+		# Get new groups from all backends
+		['231 List of new groups follows (multi-line)'] +
+		BACKENDS.inject([]) { |c, backend|
+			c + backend.newgroups(datetime)
+		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-8.3
