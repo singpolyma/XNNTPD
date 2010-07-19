@@ -6,7 +6,6 @@ class NNTPServer < SimpleProtocolServer
 	# At least one pattern must match '', for when there is no current group
 	def initialize
 		super()
-		@backends = BACKENDS
 		@current_group = nil
 		@current_article = nil
 	end
@@ -24,7 +23,7 @@ class NNTPServer < SimpleProtocolServer
 	end
 
 	def backend
-		@backends.each do |pattern, backend|
+		BACKENDS.each do |pattern, backend|
 			return backend if pattern === @current_group.to_s
 		end
 	end
