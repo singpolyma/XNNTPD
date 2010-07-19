@@ -21,7 +21,7 @@ class SimpleProtocolServer < EventMachine::Connection
 			if @multiline
 				if @buffer[-5..-1] == "\r\n.\r\n"
 					# XXX: Not using defer because the data fails to get through that way
-					callback(@multiline.call(@buffer.gsub(/\r\n\.\r\n$/, '')))
+					callback(@multiline.call(@buffer.gsub(/\r?\n?\.\r\n$/, '')))
 					@multiline = false
 					@buffer = ''
 				end
