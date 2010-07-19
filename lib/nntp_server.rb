@@ -174,10 +174,10 @@ class NNTPServer < SimpleProtocolServer
 		return '440 Posting not permitted' if readonly?
 		@multiline = lambda {|data|
 			head, body = parse_message(data)
-			return '441 Posting failed' unless head[:newsgroup].to_s != ''
+			return '441 Posting failed' unless head[:newsgroups].to_s != ''
 			success = false
 			# We can have multiple backends, up to one per group, send to them all
-			head[:newsgroup].split(/,\s*/).each {|group|
+			head[:newsgroups].split(/,\s*/).each {|group|
 				success ||= backend(group).post(:head => head, :body => body)
 			}
 			# We succeeded if any backend did
@@ -200,10 +200,10 @@ class NNTPServer < SimpleProtocolServer
 		end
 		@multiline = lambda {|data|
 			head, body = parse_message(data)
-			return '437 No Newsgroup header' unless head[:newsgroup].to_s != ''
+			return '437 No Newsgroups header' unless head[:newsgroups].to_s != ''
 			success = false
 			# We can have multiple backends, up to one per group, send to them all
-			head[:newsgroup].split(/,\s*/).each {|group|
+			head[:newsgroups].split(/,\s*/).each {|group|
 				success ||= backend(group).ihave(:head => head, :body => body)
 			}
 			# We succeeded if any backend did
