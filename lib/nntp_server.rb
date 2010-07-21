@@ -87,15 +87,20 @@ class NNTPServer < SimpleProtocolServer
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.1.1
-	def group(data)
-		return '501 Plase pass a group to select' unless data # http://tools.ietf.org/html/rfc3977#section-3.2.1
+	def group(data, &blk)
+		return '501 Plase pass a group to select' if data.to_s == '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		@current_group = nil
-		if (meta = backend(data).group(data))
-			@current_group = data
-			"211 #{meta[:total]} #{meta[:min]} #{meta[:max]} #{@current_group}"
-		else
-			'411 Group does not exist'
-		end
+		blk = lambda {|f, status| f.ready_with(status) } unless blk
+		future { |f|
+			backend(data).group(data) { |meta|
+				if meta
+					@current_group = data
+					blk.call(f, "211 #{meta[:total]} #{meta[:min]} #{meta[:max]} #{@current_group}")
+				else
+					blk.call(f, '411 Group does not exist')
+				end
+			}
+		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.1.2
@@ -103,10 +108,20 @@ class NNTPServer < SimpleProtocolServer
 		group, range = data.split(/\s+/, 2)
 		return '412 No newsgroup selected' unless group.to_s != '' || @current_group
 		group = group.to_s == '' ? @current_group : group
-		status = self.group(group)
-		return status if status.split(' ',2).first != '211'
-		range = range.to_s == '' ? nil : parse_range(range)
-		[status] + backend(group).listgroup(range)
+		self.group(group) { |f, status|
+			if status.split(' ',2).first != '211'
+				f.ready_with(status)
+			else
+				range = range.to_s == '' ? nil : parse_range(range)
+				if range.is_a?(Range) && range.begin > range.end
+					f.ready_with([status])
+				else
+					backend(group).listgroup(range) {|list|
+						f.ready_with([status] + list)
+					}
+				end
+			end
+		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.1.3
@@ -344,6 +359,16 @@ class NNTPServer < SimpleProtocolServer
 	end
 
 	protected
+	def future
+		f = Future.new(self)
+		r = yield(f)
+		if r.is_a?(EventMachine::Deferrable)
+			f
+		else
+			r
+		end
+	end
+
 	def article_part(data, method)
 		if data[0] != '<' && !data.index('@') # Message ID
 			unless (rtrn = method.cal(:message_id => data))
