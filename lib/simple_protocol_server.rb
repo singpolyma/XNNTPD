@@ -1,5 +1,6 @@
 # encoding: utf-8
 require 'eventmachine'
+require 'future'
 
 class SimpleProtocolServer < EventMachine::Connection
 
@@ -13,40 +14,38 @@ class SimpleProtocolServer < EventMachine::Connection
 	def post_init
 		@buffer = ''
 		@multiline = false
-	end
-
-	def mkdefer(*args, &blk)
-		EventMachine::defer lambda { blk.call(*args) }, method(:callback)
+		@output_q = []
 	end
 
 	def receive_data(data)
 		data.force_encoding('binary').each_char { |c| # Make no assumptions about the data
 			@buffer += c
-			if @multiline
-				if @buffer[-5..-1] == "\r\n.\r\n" || @buffer[-3..-1] == ".\r\n"
-					# XXX: Not using defer because the data fails to get through that way
-					callback(@multiline.call(@buffer.gsub(/\r?\n?\.\r\n$/, '')))
-					@multiline = false
-					@buffer = ''
-				end
+			if @multiline && @buffer[-3..-1] == ".\r\n"
+				@output_q << @multiline.call(@buffer.gsub(/\r?\n?\.\r\n$/, ''))
+				@multiline = false
+				@buffer = ''
 			elsif @buffer[-2..-1] == "\r\n" # Commands are only one line
 				@buffer.chomp!
 				commands.each do |pattern, block|
 					if pattern === @buffer # If this command matches, defer its block
-						mkdefer(@buffer.gsub(pattern, '')) { |buf| block.call(buf) }
+						@output_q << block.call(@buffer.gsub(pattern, ''))
 						break # Only match one command
 					end
 				end
 				@buffer = ''
 			end
 		}
+		future_ready if @output_q.length > 0 && !@output_q.first.is_a?(Future)
 	end
 
-	# Called with the return value of each command
-	def callback(rtrn)
-		if rtrn
-			rtrn = rtrn.join("\r\n") + "\r\n." if rtrn.respond_to?:join
-			send_data(rtrn.to_s + "\r\n")
+	def future_ready
+		EM::schedule do
+			while @output_q.length > 0 && (!@output_q.first.is_a?(Future) || @output_q.first.ready?)
+				rtrn = @output_q.shift
+				rtrn = rtrn.value if rtrn.is_a?(Future)
+				rtrn = rtrn.join("\r\n") + "\r\n." if rtrn.respond_to?:join
+				send_data(rtrn.to_s + "\r\n")
+			end
 		end
 	end
 
