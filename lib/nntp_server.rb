@@ -388,8 +388,8 @@ class NNTPServer < SimpleProtocolServer
 
 	def parse_range(string)
 		return string.to_i unless string.index('-')
-		min, max = data.split(/-/, 2)
+		min, max = string.split(/-/, 2)
 		max = 1/0.0 if max == ''
-		(min.to_i..max)
+		(min.to_i..max.to_f)
 	end
 end
