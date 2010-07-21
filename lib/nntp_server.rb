@@ -51,6 +51,9 @@ class NNTPServer < SimpleProtocolServer
 		BACKENDS.each do |pattern, backend|
 			return backend if pattern === group
 		end
+		Class.new {def method_missing(*args)
+			block_given? ? yield(nil) : nil
+		end}.new
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-5.1
