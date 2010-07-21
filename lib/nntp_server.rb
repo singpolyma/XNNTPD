@@ -22,7 +22,7 @@ class NNTPServer < SimpleProtocolServer
 			/^capabilities/i => method(:capabilities),
 			/^mode reader/i  => lambda {|d| banner}, # http://tools.ietf.org/html/rfc3977#section-5.3
 			/^quit/i         => method(:quit),
-			/^group\s+/i     => method(:group),
+			/^group\s*/i     => method(:group),
 			/^listgroup\s*/i => method(:listgroup),
 			/^last/i         => method(:last),
 			/^next/i         => method(:next),
