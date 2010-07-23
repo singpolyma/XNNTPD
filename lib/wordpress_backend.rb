@@ -36,6 +36,38 @@ class WordPressBackend
 		}
 	end
 
+	def last(g, current)
+		@db.query(prepare("SELECT
+			article_number
+		FROM
+			#{table_name('newsgroup_meta')}
+		WHERE
+			newsgroup='%s' AND article_number < %d
+		ORDER BY
+			article_number DESC
+		LIMIT 1", g, current.to_i)) { |result|
+			yield(if (result = result.fetch_row)
+				{:article_num => result[0].to_i}
+			end)
+		}
+	end
+
+	def next(g, current)
+		@db.query(prepare("SELECT
+			article_number
+		FROM
+			#{table_name('newsgroup_meta')}
+		WHERE
+			newsgroup='%s' AND article_number > %d
+		ORDER BY
+			article_number ASC
+		LIMIT 1", g, current.to_i)) { |result|
+			yield(if (result = result.fetch_row)
+				{:article_num => result[0].to_i}
+			end)
+		}
+	end
+
 	protected
 
 	def get_group_stats(g, &blk)

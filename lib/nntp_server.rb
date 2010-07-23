@@ -131,12 +131,16 @@ class NNTPServer < SimpleProtocolServer
 		return '501 LAST takes no arguments' if data.to_s != '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		return '412 No newsgroup selected' unless @current_group
 		return '420 Current article number is invalid' unless @current_article
-		if (rtrn = backend.last)
-			@current_article = rtrn[:article_num]
-			"223 #{rtrn[:article_num]} #{rtrn[:message_id]}"
-		else
-			'422 No previous article in this group'
-		end
+		future { |f|
+			backend.last(@current_group, @current_article) { |rtrn|
+				if rtrn
+					@current_article = rtrn[:article_num]
+					f.ready_with("223 #{rtrn[:article_num]} #{rtrn[:message_id]}")
+				else
+					f.ready_with('422 No previous article in this group')
+				end
+			}
+		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.1.4
@@ -144,12 +148,16 @@ class NNTPServer < SimpleProtocolServer
 		return '501 NEXT takes no arguments' if data.to_s != '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		return '412 No newsgroup selected' unless @current_group
 		return '420 Current article number is invalid' unless @current_article
-		if (rtrn = backend.next)
-			@current_article = rtrn[:article_num]
-			"223 #{rtrn[:article_num]} #{rtrn[:message_id]}"
-		else
-			'422 No previous article in this group'
-		end
+		future { |f|
+			backend.next(@current_group, @current_article) { |rtrn|
+				if rtrn
+					@current_article = rtrn[:article_num]
+					f.ready_with("223 #{rtrn[:article_num]} #{rtrn[:message_id]}")
+				else
+					f.ready_with('421 No next article in this group')
+				end
+			}
+		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.2.1
