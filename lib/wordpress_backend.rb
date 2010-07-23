@@ -47,7 +47,7 @@ class WordPressBackend
 			article_number DESC
 		LIMIT 1", g, current.to_i)) { |result|
 			yield(if (result = result.fetch_row)
-				{:article_num => result[0].to_i}
+				{:article_number => result[0].to_i}
 			end)
 		}
 	end
@@ -63,7 +63,7 @@ class WordPressBackend
 			article_number ASC
 		LIMIT 1", g, current.to_i)) { |result|
 			yield(if (result = result.fetch_row)
-				{:article_num => result[0].to_i}
+				{:article_number => result[0].to_i}
 			end)
 		}
 	end

@@ -134,8 +134,8 @@ class NNTPServer < SimpleProtocolServer
 		future { |f|
 			backend.last(@current_group, @current_article) { |rtrn|
 				if rtrn
-					@current_article = rtrn[:article_num]
-					f.ready_with("223 #{rtrn[:article_num]} #{rtrn[:message_id]}")
+					@current_article = rtrn[:article_number]
+					f.ready_with("223 #{rtrn[:article_number]} #{rtrn[:message_id]}")
 				else
 					f.ready_with('422 No previous article in this group')
 				end
@@ -151,8 +151,8 @@ class NNTPServer < SimpleProtocolServer
 		future { |f|
 			backend.next(@current_group, @current_article) { |rtrn|
 				if rtrn
-					@current_article = rtrn[:article_num]
-					f.ready_with("223 #{rtrn[:article_num]} #{rtrn[:message_id]}")
+					@current_article = rtrn[:article_number]
+					f.ready_with("223 #{rtrn[:article_number]} #{rtrn[:message_id]}")
 				else
 					f.ready_with('421 No next article in this group')
 				end
@@ -165,7 +165,7 @@ class NNTPServer < SimpleProtocolServer
 		if (rtrn = article_part(data, backend.method(:article))).is_a?String
 			return rtrn
 		end
-		["220 #{rtrn[:article_num]} #{rtrn[:head][:message_id]} Article follows (multi-line)"] +
+		["220 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Article follows (multi-line)"] +
 		rtrn[:head].map {|k,v| "#{k.to_s.gsub(/_/, '-').capitalize}: #{v}" } + [''] +
 		rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
 	end
@@ -175,7 +175,7 @@ class NNTPServer < SimpleProtocolServer
 		if (rtrn = article_part(data, backend.method(:head))).is_a?String
 			return rtrn
 		end
-		["221 #{rtrn[:article_num]} #{rtrn[:head][:message_id]} Headers follow (multi-line)"] +
+		["221 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Headers follow (multi-line)"] +
 		rtrn[:head].map {|k,v| "#{k.to_s.gsub(/_/, '-').capitalize}: #{v}" }
 	end
 
@@ -184,7 +184,7 @@ class NNTPServer < SimpleProtocolServer
 		if (rtrn = article_part(data, backend.method(:body))).is_a?String
 			return rtrn
 		end
-		["222 #{rtrn[:article_num]} #{rtrn[:head][:message_id]} Body follows (multi-line)"] +
+		["222 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Body follows (multi-line)"] +
 		rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
 	end
 
@@ -193,7 +193,7 @@ class NNTPServer < SimpleProtocolServer
 		if (rtrn = article_part(data, backend.method(:stat))).is_a?String
 			return rtrn
 		end
-		["223 #{rtrn[:article_num]} #{rtrn[:head][:message_id]}"]
+		["223 #{rtrn[:article_number]} #{rtrn[:head][:message_id]}"]
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.3.1
@@ -332,7 +332,7 @@ class NNTPServer < SimpleProtocolServer
 			end
 		else
 			return '412 No newsgroup selected' unless @current_group
-			unless (rtrn = backend.over(:article_num => data.to_i))
+			unless (rtrn = backend.over(:article_number => data.to_i))
 				return '420 Current article number is invalid'
 			end
 		end
@@ -353,17 +353,17 @@ class NNTPServer < SimpleProtocolServer
 		if range[0] != '<' && !range.index('@') # Message ID
 			BACKENDS.each { |backend|
 				if (head = backend.hdr(field, :message_id => range))
-					return ['225 Headers follow (multi-line)', "#{head[:article_num]} #{head[field]}"]
+					return ['225 Headers follow (multi-line)', "#{head[:article_number]} #{head[field]}"]
 				end
 			}
 		else # Range
 			return '412 No newsgroup selected' unless @current_group
 			range = parse_range(range)
 			['225 Headers follow (multi-line)'] + if range.is_a?Fixnum
-				backend(@current_group).hdr(field, :article_num => range)
+				backend(@current_group).hdr(field, :article_number => range)
 			else
 				backend(@current_group).hdr(field, :range => range)
-			end.map {|head| "#{head[:article_num]} #{head[field]}"}
+			end.map {|head| "#{head[:article_number]} #{head[field]}"}
 		end
 	end
 
@@ -387,7 +387,7 @@ class NNTPServer < SimpleProtocolServer
 			return '412 No newsgroup selected' unless @current_group
 			data = @current_article if data.to_s == ''
 			return '420 Current article number is invalid' if data.to_s == ''
-			unless (rtrn = method.call(:article_num => data.to_i))
+			unless (rtrn = method.call(:article_number => data.to_i))
 				return '423 No article with that number'
 			end
 		end
