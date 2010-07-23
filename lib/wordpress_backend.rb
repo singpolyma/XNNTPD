@@ -11,7 +11,7 @@ class WordPressBackend
 		get_group_stats g, &blk
 	end
 
-	def listgroup(range, &blk)
+	def listgroup(g, range, &blk)
 		range = if range
 			if range.is_a?(Fixnum)
 				' AND article_number=%d' % range
@@ -29,7 +29,7 @@ class WordPressBackend
 				#{table_name('newsgroup_meta')}
 			WHERE
 				newsgroup='%s' #{range}
-			ORDER BY article_number", @newsgroup)) { |result|
+			ORDER BY article_number", g)) { |result|
 			list = []
 			result.each {|row| list << row[0].force_encode('utf-8') }
 			blk.call(list)

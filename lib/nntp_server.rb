@@ -95,6 +95,7 @@ class NNTPServer < SimpleProtocolServer
 			backend(data).group(data) { |meta|
 				if meta
 					@current_group = data
+					@current_article = meta[:min]
 					blk.call(f, "211 #{meta[:total]} #{meta[:min]} #{meta[:max]} #{@current_group}")
 				else
 					blk.call(f, '411 Group does not exist')
@@ -116,7 +117,7 @@ class NNTPServer < SimpleProtocolServer
 				if range.is_a?(Range) && range.begin > range.end
 					f.ready_with([status])
 				else
-					backend(group).listgroup(range) {|list|
+					backend(group).listgroup(group, range) {|list|
 						f.ready_with([status] + list)
 					}
 				end
