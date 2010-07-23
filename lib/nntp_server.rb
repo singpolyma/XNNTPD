@@ -127,7 +127,7 @@ class NNTPServer < SimpleProtocolServer
 	# http://tools.ietf.org/html/rfc3977#section-6.1.3
 	# LAST means previous
 	def last(data)
-		return '501 LAST takes no arguments' if data # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		return '501 LAST takes no arguments' if data.to_s != '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		return '412 No newsgroup selected' unless @current_group
 		return '420 Current article number is invalid' unless @current_article
 		if (rtrn = backend.last)
@@ -140,7 +140,7 @@ class NNTPServer < SimpleProtocolServer
 
 	# http://tools.ietf.org/html/rfc3977#section-6.1.4
 	def next(data)
-		return '501 LAST takes no arguments' if data # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		return '501 NEXT takes no arguments' if data.to_s != '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		return '412 No newsgroup selected' unless @current_group
 		return '420 Current article number is invalid' unless @current_article
 		if (rtrn = backend.next)
