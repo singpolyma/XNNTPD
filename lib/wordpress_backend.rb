@@ -12,26 +12,16 @@ class WordPressBackend
 	end
 
 	def listgroup(g, range, &blk)
-		range = if range
-			if range.is_a?(Fixnum)
-				' AND article_number=%d' % range
-			else
-				(' AND article_number >= %d' % range.first) +
-				(range.last == 1/0.0 ? '' : ' AND article_number <= %d' % range.last)
-			end
-		else
-			''
-		end
 		@db.query(prepare("
 			SELECT
 				message_id
 			FROM
 				#{table_name('newsgroup_meta')}
 			WHERE
-				newsgroup='%s' #{range}
+				newsgroup='%s' #{range_to_sql('article_number', range)}
 			ORDER BY article_number", g)) { |result|
 			list = []
-			result.each {|row| list << row[0].force_encode('utf-8') }
+			result.each {|row| list << row[0].force_encoding('utf-8') }
 			blk.call(list)
 		}
 	end
@@ -94,6 +84,19 @@ class WordPressBackend
 
 	def table_name(t)
 		@table_prefix.to_s + t.to_s
+	end
+
+	def range_to_sql(field, range)
+		if range
+			if range.is_a?(Fixnum)
+				prepare(" AND #{field}=%d", range)
+			else
+				prepare(" AND #{field} >= %d", range.first) +
+				(range.last == 1/0.0 ? '' : prepare(" AND #{field} <= %d", range.last))
+			end
+		else
+			''
+		end
 	end
 
 	def prepare(sql, *args)
