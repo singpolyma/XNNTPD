@@ -320,7 +320,7 @@ class NNTPServer < SimpleProtocolServer
 	# http://tools.ietf.org/html/rfc3977#section-8.3
 	def over(data)
 		data = @current_article if data == ''
-		if data[0] != '<' && !data.index('@') # Message ID
+		if data[0] == '<' || data.index('@') # Message ID
 			data = "<#{data}>" unless data[0] == '<'
 			unless (rtrn = backend.over(:message_id => data))
 				return '430 No article with that message-id'
