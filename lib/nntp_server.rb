@@ -353,7 +353,7 @@ class NNTPServer < SimpleProtocolServer
 		field = field.to_s.downcase.gsub(/-/, '_').intern
 		range = @current_article if range.to_s == ''
 		return '420 Current article number is invalid' if range.to_s == ''
-		if range[0] != '<' && !range.index('@') # Message ID
+		if range[0] == '<' || range.index('@') # Message ID
 			BACKENDS.each { |backend|
 				if (head = backend.hdr(field, :message_id => range))
 					return ['225 Headers follow (multi-line)', "#{head[:article_number]} #{head[field]}"]
