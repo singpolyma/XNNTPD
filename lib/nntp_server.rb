@@ -263,6 +263,7 @@ class NNTPServer < SimpleProtocolServer
 		date, time, gmt = data.split(/\s+/, 3)
 		return '501 Use: yyyymmdd hhmmss' if date.to_s == '' || time.to_s == '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		datetime = parse_date(date, time)
+		return '501 Use: yyyymmdd hhmmss' unless datetime # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		# Get new groups from all backends
 		['231 List of new groups follows (multi-line)'] +
 		BACKENDS.inject([]) { |c, backend|
@@ -459,7 +460,11 @@ class NNTPServer < SimpleProtocolServer
 				date = (Time.now.year.to_s[0..1].to_i - 1).to_s + date
 			end
 		end
-		Time.parse(date + ' ' + time + '+0000').utc # Always assume UTC
+		begin
+			Time.parse(date + ' ' + time + '+0000').utc # Always assume UTC
+		rescue ArgumentError # When datetime is invalid
+			nil
+		end
 	end
 
 	def parse_range(string)
