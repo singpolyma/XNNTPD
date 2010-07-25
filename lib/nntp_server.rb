@@ -281,11 +281,18 @@ class NNTPServer < SimpleProtocolServer
 		wildmats, date, time, gmt = data.split(/\s+/, 4)
 		return '501 Use: yyyymmdd hhmmss' if date.to_s == '' || time.to_s == '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		datetime = parse_date(date, time)
+		return '501 Use: yyyymmdd hhmmss' unless datetime # http://tools.ietf.org/html/rfc3977#section-3.2.1
+		wildmats = parse_wildmat(wildmats)
 		# Get new news from all backends
 		# TODO: can we match the passed wildmats against backend patterns and only ask relevant backends?
-		['230 List of new articles follows (multi-line)'] +
-		BACKENDS.inject([]) { |c, backend|
-			c + backend.newnews(wildmats, datetime)
+		future { |f|
+			request = Multi.new
+			BACKENDS.each { |pattern, backend|
+				request << lambda { |&cb| backend.newnews(wildmats, datetime, &cb) }
+			}
+			request.call { |msgids|
+				f.ready_with(['230 List of new articles follows (multi-line)'] + msgids.flatten.compact)
+			}
 		}
 	end
 
@@ -455,6 +462,25 @@ class NNTPServer < SimpleProtocolServer
 		headers = Hash[headers] # Convert to hash (was array for ordering for folding)
 		body.to_s.gsub!(/\r\n../, "\r\n.")
 		[headers, body]
+	end
+
+	def parse_wildmat(wildmat)
+		wildmat = wildmat.split(/,/).map {|wildmat|
+			wildmat.gsub!(/\?/, '.')
+			wildmat.gsub!(/\*/, '.*')
+			if wildmat[0] == '!'
+				[Regexp.new("^#{wildmat[1..-1]}$"), false]
+			else
+				[Regexp.new("^#{wildmat}$"), true]
+			end
+		}
+		def wildmat.match(str)
+			self.reverse.each { |(pattern, value)|
+				return value if str =~ pattern
+			}
+			false
+		end
+		wildmat
 	end
 
 	def parse_date(date, time)

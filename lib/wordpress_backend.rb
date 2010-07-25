@@ -87,6 +87,20 @@ class WordPressBackend
 		}
 	end
 
+	def newnews(wildmats, datetime)
+		if wildmats.match(@newsgroup)
+			@db.query(prepare(
+				article_query({}, true, false) +
+				' AND datestamp >= %d', datetime.to_i)) { |result|
+				ids = []
+				result.each_hash { |row| ids << row['message_id'] }
+				yield ids
+			}
+		else
+			yield nil
+		end
+	end
+
 	protected
 
 	def get_categories(article, &blk)
