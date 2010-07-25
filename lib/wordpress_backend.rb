@@ -74,6 +74,11 @@ class WordPressBackend
 		one_article(g, args, false, false, &blk)
 	end
 
+	def ihave(msgid)
+		# Wordpress groups are moderated, no IHAVE allowed
+		yield '437 Transfer rejected; group is moderated'
+	end
+
 	def newgroups(datetime)
 		@db.query("
 			SELECT
