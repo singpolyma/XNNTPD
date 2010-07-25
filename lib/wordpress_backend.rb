@@ -175,6 +175,7 @@ class WordPressBackend
 		stmt << prepare(" AND message_id='%s'", args[:message_id]) if args[:message_id]
 		stmt << range_to_sql('article_number', args[:article_number])
 		stmt << prepare(' LIMIT %d', args[:limit]) if args[:limit]
+		stmt
 	end
 
 	def message_id(id, table)
