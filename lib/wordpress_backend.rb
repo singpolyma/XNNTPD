@@ -74,6 +74,19 @@ class WordPressBackend
 		one_article(g, args, false, false, &blk)
 	end
 
+	def newgroups(datetime)
+		@db.query("
+			SELECT
+				MIN(UNIX_TIMESTAMP(post_date_gmt)) as start
+			FROM #{table_name('posts')}") { |result|
+			if (result = result.fetch_row) && Time.at(result[0].to_i) >= datetime
+				yield @newsgroup
+			else
+				yield nil
+			end
+		}
+	end
+
 	protected
 
 	def get_categories(article, &blk)

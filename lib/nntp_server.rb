@@ -265,9 +265,14 @@ class NNTPServer < SimpleProtocolServer
 		datetime = parse_date(date, time)
 		return '501 Use: yyyymmdd hhmmss' unless datetime # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		# Get new groups from all backends
-		['231 List of new groups follows (multi-line)'] +
-		BACKENDS.inject([]) { |c, backend|
-			c + backend.newgroups(datetime)
+		future { |f|
+			request = Multi.new
+			BACKENDS.each { |pattern, backend|
+				request << lambda { |&cb| backend.newgroups(datetime, &cb) }
+			}
+			request.call { |groups|
+				f.ready_with(['231 List of new groups follows (multi-line)'] + groups.flatten.compact)
+			}
 		}
 	end
 
