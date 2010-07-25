@@ -1,5 +1,6 @@
 $: << File.dirname(__FILE__)
 require 'simple_protocol_server'
+require 'multi'
 require 'time'
 
 class NNTPServer < SimpleProtocolServer
@@ -165,38 +166,38 @@ class NNTPServer < SimpleProtocolServer
 
 	# http://tools.ietf.org/html/rfc3977#section-6.2.1
 	def article(data)
-		if (rtrn = article_part(data, backend.method(:article))).is_a?String
-			return rtrn
-		end
-		["220 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Article follows (multi-line)"] +
-		rtrn[:head].map {|k,v| "#{k.to_s.gsub(/_/, '-').capitalize}: #{v}" } + [''] +
-		rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
+		article_part(data, :article) { |rtrn|
+			@current_article = rtrn[:article_number]
+			["220 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Article follows (multi-line)"] +
+			format_head(rtrn[:article_number], rtrn[:head]) + [''] +
+			rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
+		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.2.2
 	def head(data)
-		if (rtrn = article_part(data, backend.method(:head))).is_a?String
-			return rtrn
-		end
-		["221 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Headers follow (multi-line)"] +
-		rtrn[:head].map {|k,v| "#{k.to_s.gsub(/_/, '-').capitalize}: #{v}" }
+		article_part(data, :head) { |rtrn|
+			@current_article = rtrn[:article_number]
+			["221 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Headers follow (multi-line)"] +
+			format_head(rtrn[:article_number], rtrn[:head])
+		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.2.3
 	def body(data)
-		if (rtrn = article_part(data, backend.method(:body))).is_a?String
-			return rtrn
-		end
-		["222 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Body follows (multi-line)"] +
-		rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
+		article_part(data, :body) { |rtrn|
+			@current_article = rtrn[:article_number]
+			["222 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Body follows (multi-line)"] +
+			rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
+		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.2.4
 	def stat(data)
-		if (rtrn = article_part(data, backend.method(:stat))).is_a?String
-			return rtrn
-		end
-		["223 #{rtrn[:article_number]} #{rtrn[:head][:message_id]}"]
+		article_part(data, :stat) { |rtrn|
+			@current_article = rtrn[:article_number]
+			["223 #{rtrn[:article_number]} #{rtrn[:head][:message_id]}"]
+		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-6.3.1
@@ -381,20 +382,55 @@ class NNTPServer < SimpleProtocolServer
 		end
 	end
 
-	def article_part(data, method)
-		if data[0] != '<' && !data.index('@') # Message ID
-			unless (rtrn = method.cal(:message_id => data))
-				return '430 No article with that message-id'
-			end
+	def format_head(article_number, hash)
+		hash[:in_reply_to] = hash[:references].last if hash[:references] && !hash[:in_reply_to]
+		if hash[:newsgroups].index(@current_group)
+			hash[:xref] = "#{HOST} #{@current_group}:#{article_number.to_i}"
 		else
-			return '412 No newsgroup selected' unless @current_group
+			# If asking for a message ID from another group, choose some group and we don't know the article number
+			hash[:xref] = "#{HOST} #{hash[:newsgroups].first}:0"
+		end
+		hash[:path] = HOST unless hash[:path]
+		hash.map {|k,v|
+			next unless v
+			v = v.utc.rfc2822 if v.is_a?Time
+			v = v.join(', ') if v.respond_to?:join
+			"#{k.to_s.gsub(/_/, '-').capitalize}: #{v}"
+		}
+	end
+
+	def article_part(data, method)
+		if data[0] == '<' || data.index('@') # Message ID
+			future { |f|
+				request = Multi.new
+				BACKENDS.each { |pattern, backend|
+					m = backend.method(method)
+					request << lambda { |&cb| m.call(@current_group, :message_id => data, &cb) } if m
+				}
+				request.call { |rtrn|
+					rtrn = rtrn.flatten.compact.first
+					if rtrn
+						f.ready_with(yield rtrn)
+					else
+						f.ready_with('430 No article with that message-id')
+					end
+				}
+			}
+		else
+			method = backend.method(method)
+			return '412 No newsgroup selected' unless @current_group && method
 			data = @current_article if data.to_s == ''
 			return '420 Current article number is invalid' if data.to_s == ''
-			unless (rtrn = method.call(:article_number => data.to_i))
-				return '423 No article with that number'
-			end
+			future { |f|
+				method.call(@current_group, :article_number => data.to_i) { |rtrn|
+					if rtrn
+						f.ready_with(yield rtrn)
+					else
+						f.ready_wih('423 No article with that number')
+					end
+				}
+			}
 		end
-		rtrn
 	end
 
 	def parse_message(data)
