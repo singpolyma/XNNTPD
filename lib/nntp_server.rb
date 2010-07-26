@@ -317,10 +317,9 @@ class NNTPServer < SimpleProtocolServer
 	# http://tools.ietf.org/html/rfc3977#section-8.4
 	def list_overview_fmt(data)
 		['215 Order of fields from OVER command'] +
-		OVERVIEW_FMT.map {|i| i.inspect.capitalize } +
-		backend.overview_fmt.map {|i|
+		(OVERVIEW_FMT + (backend.overview_fmt || [])).map {|i|
 			if i.is_a?String
-				i.capitalize.gsub(/_/, '-') + ':full'
+				i.capitalize.gsub(/_/, '-') + "#{':full' unless OVERVIEW_FMT.index(i)}"
 			else
 				i.inspect
 			end

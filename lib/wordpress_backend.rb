@@ -119,6 +119,10 @@ class WordPressBackend
 		end
 	end
 
+	def overview_fmt
+		[] # No extra fields from this backend
+	end
+
 	protected
 
 	def get_categories(article, &blk)
