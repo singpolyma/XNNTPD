@@ -352,6 +352,7 @@ class NNTPServer < SimpleProtocolServer
 				if rtrn
 					f.ready_with(['224 Overview information follows (multi-line)'] +
 					rtrn.map {|headers|
+						headers[:article_number].to_i.to_s + "\t" +
 						(OVERVIEW_FMT + (backend.overview_fmt || [])).map {|header|
 							# Make no assumptions about the data
 							begin
