@@ -266,11 +266,7 @@ class NNTPServer < SimpleProtocolServer
 		return '501 Use: yyyymmdd hhmmss' unless datetime # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		# Get new groups from all backends
 		future { |f|
-			request = Multi.new
-			BACKENDS.each { |pattern, backend|
-				request << lambda { |&cb| backend.newgroups(datetime, &cb) }
-			}
-			request.call { |groups|
+			each_backend { |backend, &cb| backend.newgroups(datetime, &cb) }.call { |groups|
 				f.ready_with(['231 List of new groups follows (multi-line)'] + groups.flatten.compact)
 			}
 		}
@@ -286,11 +282,7 @@ class NNTPServer < SimpleProtocolServer
 		# Get new news from all backends
 		# TODO: can we match the passed wildmats against backend patterns and only ask relevant backends?
 		future { |f|
-			request = Multi.new
-			BACKENDS.each { |pattern, backend|
-				request << lambda { |&cb| backend.newnews(wildmats, datetime, &cb) }
-			}
-			request.call { |msgids|
+			each_backend { |backend, &cb| backend.newnews(wildmats, datetime, &cb) }.call { |msgids|
 				f.ready_with(['230 List of new articles follows (multi-line)'] + msgids.flatten.compact)
 			}
 		}
@@ -300,11 +292,7 @@ class NNTPServer < SimpleProtocolServer
 	def list_active(data)
 		data = parse_wildmat(data)
 		future { |f|
-			request = Multi.new
-			BACKENDS.each { |pattern, backend|
-				request << lambda {|&cb| backend.list(data, &cb) }
-			}
-			request.call { |groups|
+			each_backend { |backend, &cb| backend.list(data, &cb) }.call { |groups|
 				f.ready_with(['215 List of groups follows (multi-line)'] +
 				groups.flatten.compact.map { |group|
 					"#{group[:newsgroup]} #{group[:max]} #{group[:min]} #{group[:readonly] ? 'n' : (group[:moderated] ? 'm' : 'y')}"
@@ -317,11 +305,7 @@ class NNTPServer < SimpleProtocolServer
 	def list_newsgroups(data)
 		data = parse_wildmat(data)
 		future { |f|
-			request = Multi.new
-			BACKENDS.each { |pattern, backend|
-				request << lambda {|&cb| backend.list(data, &cb) }
-			}
-			request.call { |groups|
+			each_backend { |backend, &cb| backend.list(data, &cb) }.call { |groups|
 				f.ready_with(['215 List of groups follows (multi-line)'] +
 				groups.flatten.compact.map { |group|
 					"#{group[:newsgroup]}\t#{group[:title]}"
@@ -409,6 +393,14 @@ class NNTPServer < SimpleProtocolServer
 		end
 	end
 
+	def each_backend(&blk)
+		request = Multi.new
+		BACKENDS.each { |pattern, backend|
+			request << lambda {|&cb| blk.call(backend, &cb) }
+		}
+		request
+	end
+
 	def format_head(article_number, hash)
 		hash[:in_reply_to] = hash[:references].last if hash[:references] && !hash[:in_reply_to]
 		if hash[:newsgroups].index(@current_group)
@@ -429,12 +421,9 @@ class NNTPServer < SimpleProtocolServer
 	def article_part(data, method)
 		if data[0] == '<' || data.index('@') # Message ID
 			future { |f|
-				request = Multi.new
-				BACKENDS.each { |pattern, backend|
-					m = backend.method(method)
-					request << lambda { |&cb| m.call(@current_group, :message_id => data, &cb) } if m
-				}
-				request.call { |rtrn|
+				each_backend { |backend, &cb|
+					backend.send(method, @current_group, :message_id => data, &cb)
+				}.call { |rtrn|
 					rtrn = rtrn.flatten.compact.first
 					if rtrn
 						f.ready_with(yield rtrn)
