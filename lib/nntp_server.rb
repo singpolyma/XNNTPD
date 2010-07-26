@@ -333,28 +333,41 @@ class NNTPServer < SimpleProtocolServer
 
 	# http://tools.ietf.org/html/rfc3977#section-8.3
 	def over(data)
-		data = @current_article if data == ''
+		data = @current_article.to_s if data == ''
 		if data[0] == '<' || data.index('@') # Message ID
 			data = "<#{data}>" unless data[0] == '<'
-			unless (rtrn = backend.over(:message_id => data))
-				return '430 No article with that message-id'
-			end
+			args = {:message_id => data}
+			error = '430 No article with that message-id'
 		elsif data.index('-') # Range
 			return '412 No newsgroup selected' unless @current_group
-			unless (rtrn = backend.over(:range => parse_range(data)))
-				return '423 No articles in that range'
-			end
+			args = {:article_number => parse_range(data)}
+			error = '423 No articles in that range'
 		else
 			return '412 No newsgroup selected' unless @current_group
-			unless (rtrn = backend.over(:article_number => data.to_i))
-				return '420 Current article number is invalid'
-			end
+			args = {:article_number => data.to_i} # Backends see this as a range of type Fixnum
+			error = '420 Current article number is invalid'
 		end
-		['224 Overview information follows (multi-line)'] +
-		rtrn.map {|headers|
-			(OVERVIEW_FMT + backend.overview_fmt).map {|header|
-				headers[header.downcase.gsub(/-/,'_').intern].force_encoding('binary') # Make no assumptions about the data
-			}.join("\t")
+		future {|f|
+			backend.over(@current_group, args) {|rtrn|
+				if rtrn
+					f.ready_with(['224 Overview information follows (multi-line)'] +
+					rtrn.map {|headers|
+						(OVERVIEW_FMT + (backend.overview_fmt || [])).map {|header|
+							# Make no assumptions about the data
+							begin
+								v = headers[header.to_s.downcase.gsub(/-/,'_').intern]
+								v = v.utc.rfc2822 if v.is_a?Time
+								v = v.join(', ') if v.respond_to?:join
+								v.to_s.encode('utf-8')
+							rescue Exception
+								''
+							end
+						}.join("\t")
+					})
+				else
+					f.ready_with(error)
+				end
+			}
 		}
 	end
 
@@ -376,7 +389,7 @@ class NNTPServer < SimpleProtocolServer
 			['225 Headers follow (multi-line)'] + if range.is_a?Fixnum
 				backend(@current_group).hdr(field, :article_number => range)
 			else
-				backend(@current_group).hdr(field, :range => range)
+				backend(@current_group).hdr(field, :article_number => range)
 			end.map {|head| "#{head[:article_number]} #{head[field]}"}
 		end
 	end
@@ -413,7 +426,7 @@ class NNTPServer < SimpleProtocolServer
 			next unless v
 			v = v.utc.rfc2822 if v.is_a?Time
 			v = v.join(', ') if v.respond_to?:join
-			"#{k.to_s.gsub(/_/, '-').capitalize}: #{v}"
+			"#{k.to_s.gsub(/_/, '-').capitalize}: #{v}".encode('utf-8')
 		}
 	end
 

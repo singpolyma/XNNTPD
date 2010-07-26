@@ -123,6 +123,21 @@ class WordPressBackend
 		[] # No extra fields from this backend
 	end
 
+	def over(g, args)
+		@db.query(article_query(args.merge(:newsgroup => g))) { |result|
+			request = Multi.new
+			result.each_hash {|h|
+				request << lambda {|&cb| format_hash(h) { |head|
+					cb.call(head.merge(:bytes => h['post_content'].force_encoding('binary').length,
+					                   :lines => h['post_content'].split(/\n/).length))
+				} }
+			}
+			request.call { |result|
+				yield result.flatten.compact
+			}
+		}
+	end
+
 	protected
 
 	def get_categories(article, &blk)
