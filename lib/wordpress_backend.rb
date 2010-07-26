@@ -253,11 +253,11 @@ class WordPressBackend
 	def format_hash(hash)
 		# Forcing encodings because mysqlplus lies to us about the encoding
 		h = ({
-			:newsgroups     => [@newsgroup],
-			:message_id     => hash['message_id'].force_encoding('utf-8'),
-			:from           => "\"#{hash['display_name']}\" <#{hash['user_email']}>".force_encoding('utf-8'),
-			:subject        => hash['post_title'].force_encoding('utf-8'),
-			:date           => Time.at(hash['datestamp'].to_i)
+			:newsgroups => [@newsgroup],
+			:message_id => hash['message_id'].force_encoding('utf-8'),
+			:from       => "\"#{hash['display_name']}\" <#{hash['user_email']}>".force_encoding('utf-8'),
+			:subject    => hash['post_title'].force_encoding('utf-8'),
+			:date       => Time.at(hash['datestamp'].to_i)
 		})
 		h[:references] = [] if hash['post_parent'].to_i > 0 || hash['comment_parent'].to_i > 0
 		request = Multi.new
