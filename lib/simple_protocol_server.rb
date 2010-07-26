@@ -35,7 +35,7 @@ class SimpleProtocolServer < EventMachine::Connection
 				@buffer = ''
 			end
 		}
-		future_ready if @output_q.length > 0 && !@output_q.first.is_a?(Future)
+		future_ready if @output_q.length > 0
 	end
 
 	def future_ready
