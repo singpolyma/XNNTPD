@@ -355,10 +355,7 @@ class NNTPServer < SimpleProtocolServer
 						(OVERVIEW_FMT + (backend.overview_fmt || [])).map {|header|
 							# Make no assumptions about the data
 							begin
-								v = headers[header.to_s.downcase.gsub(/-/,'_').intern]
-								v = v.utc.rfc2822 if v.is_a?Time
-								v = v.join(', ') if v.respond_to?:join
-								v.to_s.encode('utf-8')
+								format_head_value(headers[header.to_s.downcase.gsub(/-/,'_').intern])
 							rescue Exception
 								''
 							end
@@ -375,22 +372,28 @@ class NNTPServer < SimpleProtocolServer
 	def hdr(data)
 		field, range = data.split(/\s+/, 2)
 		field = field.to_s.downcase.gsub(/-/, '_').intern
-		range = @current_article if range.to_s == ''
+		range = @current_article.to_s if range.to_s == ''
 		return '420 Current article number is invalid' if range.to_s == ''
 		if range[0] == '<' || range.index('@') # Message ID
-			BACKENDS.each { |backend|
-				if (head = backend.hdr(field, :message_id => range))
-					return ['225 Headers follow (multi-line)', "#{head[:article_number]} #{head[field]}"]
-				end
+			future {|f|
+				each_backend { |backend, &cb|
+					backend.hdr(@current_group, field, :message_id => range, &cb)
+				}.call { |heads|
+					head = heads.flatten.compact.first || {}
+					f.ready_with(['225 Headers follow (multi-line)', "0 #{format_head_value(head[field])}"])
+				}
 			}
 		else # Range
 			return '412 No newsgroup selected' unless @current_group
 			range = parse_range(range)
-			['225 Headers follow (multi-line)'] + if range.is_a?Fixnum
-				backend(@current_group).hdr(field, :article_number => range)
-			else
-				backend(@current_group).hdr(field, :article_number => range)
-			end.map {|head| "#{head[:article_number]} #{head[field]}"}
+			future {|f|
+				backend(@current_group).hdr(@current_group, field, :article_number => range) {|hdrs|
+					f.ready_with(['225 Headers follow (multi-line)'] + ((hdrs || []).compact.map {|head|
+						next if head[field].to_s == ''
+						"#{head[:article_number]} #{format_head_value(head[field])}"
+					}))
+				}
+			}
 		end
 	end
 
@@ -413,6 +416,12 @@ class NNTPServer < SimpleProtocolServer
 		request
 	end
 
+	def format_head_value(v)
+		v = v.utc.rfc2822 if v.is_a?Time
+		v = v.join(', ') if v.respond_to?:join
+		v.to_s.encode('utf-8')
+	end
+
 	def format_head(article_number, hash)
 		hash[:in_reply_to] = hash[:references].last if hash[:references] && !hash[:in_reply_to]
 		if hash[:newsgroups].index(@current_group)
@@ -424,9 +433,7 @@ class NNTPServer < SimpleProtocolServer
 		hash[:path] = HOST unless hash[:path]
 		hash.map {|k,v|
 			next unless v
-			v = v.utc.rfc2822 if v.is_a?Time
-			v = v.join(', ') if v.respond_to?:join
-			"#{k.to_s.gsub(/_/, '-').capitalize}: #{v}".encode('utf-8')
+			"#{k.to_s.gsub(/_/, '-').capitalize}: #{format_head_value(v)}".encode('utf-8')
 		}
 	end
 

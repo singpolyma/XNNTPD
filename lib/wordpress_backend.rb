@@ -129,13 +129,18 @@ class WordPressBackend
 			result.each_hash {|h|
 				request << lambda {|&cb| format_hash(h) { |head|
 					cb.call(head.merge(:bytes => h['post_content'].force_encoding('binary').length,
-					                   :lines => h['post_content'].split(/\n/).length))
+					                   :lines => h['post_content'].split(/\n/).length,
+					                   :article_number => h['article_number'].to_i))
 				} }
 			}
 			request.call { |result|
 				yield result.flatten.compact
 			}
 		}
+	end
+
+	def hdr(g, field, args, &cb)
+		over(g, args, &cb)
 	end
 
 	protected
