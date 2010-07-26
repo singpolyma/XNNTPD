@@ -7,6 +7,14 @@ class WordPressBackend
 		@newsgroup    = config[:newsgroup]
 		@title        = config[:title]
 		@readonly     = config[:readonly]
+		@db.query("
+			CREATE TABLE IF NOT EXISTS wp_newsgroup_meta(
+			article_number BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			message_id CHAR(255) UNIQUE NOT NULL,
+			id BIGINT NOT NULL, tbl CHAR(50), newsgroup CHAR(255),
+			CONSTRAINT UNIQUE INDEX id_table (id, tbl),
+			INDEX newsgroup (newsgroup)
+			)")
 	end
 
 	def group(g, &blk)
@@ -96,6 +104,7 @@ class WordPressBackend
 
 	def newnews(wildmats, datetime)
 		if wildmats.match(@newsgroup)
+			update_newsgroup_meta
 			@db.query(prepare(
 				article_query({}, true, false) +
 				' AND datestamp >= %d', datetime.to_i)) { |result|
@@ -296,7 +305,33 @@ class WordPressBackend
 	end
 
 	def update_newsgroup_meta
-		# TODO
+		# Just run the update in the background. No one is waiting on us to be done
+		@db.query(prepare("INSERT INTO #{table_name('newsgroup_meta')} (id, tbl, message_id, newsgroup)
+			SELECT ID, tbl, message_id, '%s' FROM (
+			(SELECT
+				a.ID, '#{table_name('posts')}' AS tbl,
+				CONCAT('<post-', a.ID, '@%s>') AS message_id,
+				post_date_gmt AS datestamp
+			FROM
+				#{table_name('posts')} a
+				LEFT JOIN #{table_name('newsgroup_meta')} b ON a.ID=b.id AND b.tbl='#{table_name('posts')}'
+			WHERE
+				isNULL(b.id) AND post_type='post' AND post_status='publish'
+			) UNION (
+			SELECT
+				comment_ID as ID, '#{table_name('comments')}' AS tbl,
+				CONCAT('<comment-', comment_ID, '@%s>') AS message_id,
+				comment_date_gmt AS datestamp
+			FROM
+				#{table_name('posts')} c,
+				#{table_name('comments')} a
+				LEFT JOIN #{table_name('newsgroup_meta')} b ON comment_ID=b.id AND b.tbl='#{table_name('comments')}'
+			WHERE
+				a.comment_post_ID=c.ID AND
+				isNULL(b.id) AND comment_approved='1' AND
+				post_type='post' AND post_status='publish'
+			)
+			ORDER BY datestamp) t", @newsgroup, HOST, HOST))
 	end
 
 	def table_name(t)
