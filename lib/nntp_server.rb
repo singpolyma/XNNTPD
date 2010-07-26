@@ -37,13 +37,13 @@ class NNTPServer < SimpleProtocolServer
 			/^help/i         => method(:help),
 			/^newgroups\s*/i => method(:newgroups),
 			/^newnews\s*/i   => method(:newnews),
-			/^list active\s*/=> method(:list_active),
-			/^list newsgroups\s*/ => method(:list_newsgroups),
+			/^list active\s*/i => method(:list_active),
+			/^list newsgroups\s*/i => method(:list_newsgroups),
 			/^list overview\.fmt/i => method(:list_overview_fmt),
 			/^list headers/i => method(:list_headers),
-			/^list\s*/       => method(:list_active),
+			/^list\s*/i      => method(:list_active),
 			/^x?over\s*/i    => method(:over), # Allow XOVER for historical reasons
-			/^x?hdr\s*/      => method(:hdr), # Allow XHDR for historical reasons
+			/^x?hdr\s*/i     => method(:hdr), # Allow XHDR for historical reasons
 			/.*/             => lambda {|d| "500 Command not recognized" } # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		}
 	end
