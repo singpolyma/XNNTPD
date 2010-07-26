@@ -4,7 +4,9 @@ class WordPressBackend
 	def initialize(config)
 		@db = EventMachine::MySQL.new(config[:db].merge(:encoding => 'utf8'))
 		@table_prefix = config[:table_prefix]
-		@newsgroup = config[:newsgroup]
+		@newsgroup    = config[:newsgroup]
+		@title        = config[:title]
+		@readonly     = config[:readonly]
 	end
 
 	def group(g, &blk)
@@ -100,6 +102,17 @@ class WordPressBackend
 				ids = []
 				result.each_hash { |row| ids << row['message_id'] }
 				yield ids
+			}
+		else
+			yield nil
+		end
+	end
+
+	def list(wildmat)
+		if wildmat.match(@newsgroup)
+			get_group_stats(@newsgroup) { |stats|
+				yield [stats.merge({:newsgroup => @newsgroup, :title => @title,
+				       :readonly => @readonly, :moderated => true})]
 			}
 		else
 			yield nil

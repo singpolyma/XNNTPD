@@ -298,20 +298,34 @@ class NNTPServer < SimpleProtocolServer
 
 	# http://tools.ietf.org/html/rfc3977#section-7.6.3
 	def list_active(data)
-		['215 List of groups follows (multi-line)'] +
-		BACKENDS.inject([]) {|c, backend|
-			c + backend.list(data).map {|group|
-				"#{group[:group]} #{group[:max]} #{group[:min]} #{group[:readonly] ? 'n' : (group[:moderated] ? 'm' : 'y')}"
+		data = parse_wildmat(data)
+		future { |f|
+			request = Multi.new
+			BACKENDS.each { |pattern, backend|
+				request << lambda {|&cb| backend.list(data, &cb) }
+			}
+			request.call { |groups|
+				f.ready_with(['215 List of groups follows (multi-line)'] +
+				groups.flatten.compact.map { |group|
+					"#{group[:newsgroup]} #{group[:max]} #{group[:min]} #{group[:readonly] ? 'n' : (group[:moderated] ? 'm' : 'y')}"
+				})
 			}
 		}
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-7.6.6
 	def list_newsgroups(data)
-		['215 List of groups follows (multi-line)'] +
-		BACKENDS.inject([]) {|c, backend|
-			c + backend.list(data).map {|group|
-				"#{group[:group]}\t#{group[:title]}"
+		data = parse_wildmat(data)
+		future { |f|
+			request = Multi.new
+			BACKENDS.each { |pattern, backend|
+				request << lambda {|&cb| backend.list(data, &cb) }
+			}
+			request.call { |groups|
+				f.ready_with(['215 List of groups follows (multi-line)'] +
+				groups.flatten.compact.map { |group|
+					"#{group[:newsgroup]}\t#{group[:title]}"
+				})
 			}
 		}
 	end
@@ -465,7 +479,9 @@ class NNTPServer < SimpleProtocolServer
 	end
 
 	def parse_wildmat(wildmat)
+		wildmat = '*' if wildmat.to_s == ''
 		wildmat = wildmat.split(/,/).map {|wildmat|
+			wildmat.gsub!(/\./, '\.')
 			wildmat.gsub!(/\?/, '.')
 			wildmat.gsub!(/\*/, '.*')
 			if wildmat[0] == '!'
