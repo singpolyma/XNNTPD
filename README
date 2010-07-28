@@ -8,3 +8,4 @@ This server will conform strictly to at least RFC3977.  Provided backends will c
 
 * EventMachine
 * Daemons (only if you want to daemonize)
+* HTML2Markdown (if you use backends that store HTML only)

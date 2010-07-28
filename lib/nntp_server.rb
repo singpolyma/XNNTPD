@@ -1,7 +1,17 @@
+# encoding: utf-8
 $: << File.dirname(__FILE__)
 require 'simple_protocol_server'
 require 'multi'
 require 'time'
+begin
+	require 'html2markdown'
+rescue LoadError
+	warn 'Could not load html2markdown, text/plain conversion may suck.'
+	class HTML2Markdown
+		def initialize(s); @s = s; end
+		def to_s; @s.gsub(/<[^>]+>/, "\n"); end
+	end
+end
 
 class NNTPServer < SimpleProtocolServer
 	# Hash of pattern => object backends must be in NNTP_BACKENDS
@@ -438,6 +448,17 @@ class NNTPServer < SimpleProtocolServer
 		}
 	end
 
+	def fix_content_type(msg)
+		if !msg[:head][:content_type]
+			msg[:head][:content_type] = 'text/plain; charset=utf-8'
+		elsif msg[:head][:content_type] =~ /^text\/html\b/i
+			# TODO: real MIME
+			msg[:head][:content_type] = 'text/plain; charset=utf-8'
+			msg[:body] = HTML2Markdown.new(msg[:body]).to_s if msg[:body]
+		end
+		msg
+	end
+
 	def article_part(data, method)
 		if data[0] == '<' || data.index('@') # Message ID
 			future { |f|
@@ -446,7 +467,7 @@ class NNTPServer < SimpleProtocolServer
 				}.call { |rtrn|
 					rtrn = rtrn.flatten.compact.first
 					if rtrn
-						f.ready_with(yield rtrn)
+						f.ready_with(yield fix_content_type(rtrn))
 					else
 						f.ready_with('430 No article with that message-id')
 					end
@@ -460,7 +481,7 @@ class NNTPServer < SimpleProtocolServer
 			future { |f|
 				method.call(@current_group, :article_number => data.to_i) { |rtrn|
 					if rtrn
-						f.ready_with(yield rtrn)
+						f.ready_with(yield fix_content_type(rtrn))
 					else
 						f.ready_wih('423 No article with that number')
 					end
