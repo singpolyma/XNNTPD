@@ -1,4 +1,5 @@
 require 'em-mysqlplus'
+require 'uri'
 
 class WordPressBackend
 	def initialize(config)
@@ -7,6 +8,11 @@ class WordPressBackend
 		@newsgroup    = config[:newsgroup]
 		@title        = config[:title]
 		@readonly     = config[:readonly]
+		@homeuri = nil
+		@db.query("SELECT option_value
+			FROM #{table_name('options')} WHERE option_name='home'") { |result|
+			@homeuri = URI::parse(result.fetch_row[0])
+		}
 		@db.query("
 			CREATE TABLE IF NOT EXISTS wp_newsgroup_meta(
 			article_number BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -261,12 +267,20 @@ class WordPressBackend
 
 	def format_hash(hash)
 		# Forcing encodings because mysqlplus lies to us about the encoding
+		uri = @homeuri.dup
+		if hash['tbl'] == table_name('posts')
+			uri.query = "p=#{hash['id']}"
+		else
+			uri.query = "p=#{hash['post_parent']}"
+			uri.fragment = "comment-#{hash['id']}"
+		end
 		h = ({
 			:newsgroups => [@newsgroup],
 			:message_id => hash['message_id'].force_encoding('utf-8'),
 			:from       => "\"#{hash['display_name']}\" <#{hash['user_email']}>".force_encoding('utf-8'),
 			:subject    => hash['post_title'].force_encoding('utf-8'),
-			:date       => Time.at(hash['datestamp'].to_i)
+			:date       => Time.at(hash['datestamp'].to_i),
+			:content_location => uri
 		})
 		h[:references] = [] if hash['post_parent'].to_i > 0 || hash['comment_parent'].to_i > 0
 		request = Multi.new
