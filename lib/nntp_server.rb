@@ -26,7 +26,8 @@ class NNTPServer < SimpleProtocolServer
 	def readonly?; self.class.readonly?; end
 
 	# Mandatory start to LIST OVERVIEW.FMT from http://tools.ietf.org/html/rfc3977#section-8.4
-	OVERVIEW_FMT = ['subject', 'from', 'date', 'message-id', 'references', :bytes, :lines]
+	# Plus Xref header, because many newsreaders want that
+	OVERVIEW_FMT = ['subject', 'from', 'date', 'message-id', 'references', :bytes, :lines, 'xref']
 
 	def commands
 		{
@@ -329,7 +330,7 @@ class NNTPServer < SimpleProtocolServer
 		['215 Order of fields from OVER command'] +
 		(OVERVIEW_FMT + (backend.overview_fmt || [])).map {|i|
 			if i.is_a?String
-				i.capitalize.gsub(/_/, '-') + "#{':full' unless OVERVIEW_FMT.index(i)}"
+				i.to_s.capitalize.gsub(/_/, '-') + ':' + "#{'full' unless OVERVIEW_FMT.index(i)}"
 			else
 				i.inspect
 			end
@@ -362,6 +363,7 @@ class NNTPServer < SimpleProtocolServer
 				if rtrn
 					f.ready_with(['224 Overview information follows (multi-line)'] +
 					rtrn.map {|headers|
+						headers = fixup_headers(headers[:article_number], headers)
 						headers[:article_number].to_i.to_s + "\t" +
 						(OVERVIEW_FMT + (backend.overview_fmt || [])).map {|header|
 							# Make no assumptions about the data
@@ -434,18 +436,24 @@ class NNTPServer < SimpleProtocolServer
 	end
 
 	def format_head(article_number, hash)
-		hash[:in_reply_to] = hash[:references].last if hash[:references] && !hash[:in_reply_to]
-		if hash[:newsgroups].index(@current_group)
-			hash[:xref] = "#{HOST} #{@current_group}:#{article_number.to_i}"
-		else
-			# If asking for a message ID from another group, choose some group and we don't know the article number
-			hash[:xref] = "#{HOST} #{hash[:newsgroups].first}:0"
-		end
-		hash[:path] = HOST unless hash[:path]
-		hash.map {|k,v|
+		fixup_headers(article_number, hash).map {|k,v|
 			next unless v
 			"#{k.to_s.gsub(/_/, '-').capitalize}: #{format_head_value(v)}".encode('utf-8')
 		}
+	end
+
+	def fixup_headers(article_number, headers)
+		headers[:in_reply_to] = headers[:references].last if headers[:references] && !headers[:in_reply_to]
+		if headers[:newsgroups] # Don't neet this when requesting body
+			if headers[:newsgroups].index(@current_group)
+				headers[:xref] = "#{HOST} #{@current_group}:#{article_number.to_i}"
+			else
+				# If asking for a message ID from another group, choose some group and we don't know the article number
+				headers[:xref] = "#{HOST} #{headers[:newsgroups].first}:0"
+			end
+		end
+		headers[:path] = HOST unless headers[:path]
+		headers
 	end
 
 	def fix_content_type(msg)
