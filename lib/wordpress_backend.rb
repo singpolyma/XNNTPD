@@ -31,7 +31,7 @@ class WordPressBackend
 	def listgroup(g, range, &blk)
 		@db.query(prepare("
 			SELECT
-				message_id
+				article_number
 			FROM
 				#{table_name('newsgroup_meta')}
 			WHERE
