@@ -326,7 +326,7 @@ class WordPressBackend
 		body.gsub!(/(<\/?#{allblocks}[^>]*>)\s*<\/p>/, '\1')
 		# This is probably messing up <pre> tags. WordPress has code to fix that, should port it
 		body.gsub!(/\n<\/p>$/, '</p>')
-		body
+		"<html><body>#{body}</body></html>"
 	end
 
 	def get_group_stats(g, &blk)
