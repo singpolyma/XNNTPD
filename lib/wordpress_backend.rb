@@ -1,3 +1,4 @@
+# encoding: utf-8
 require 'em-mysqlplus'
 require 'uri'
 
@@ -178,11 +179,14 @@ class WordPressBackend
 		@db.query(article_query(args.merge(:newsgroup => g, :limit => 1), head, body)) { |result|
 			if (result = result.fetch_hash)
 				hash = {:article_number => result['article_number'].to_i}
-				hash.merge!(:body => result['post_content'].force_encoding('utf-8')) if body
-				hash[:head] = {:message_id => result['message_id'].force_encoding('utf-8')} unless head
+				hash.merge!(:body => format_body(result['post_content'])) if body
+				hash[:head] = {
+					:message_id   => result['message_id'].force_encoding('utf-8'),
+					:content_type => 'text/html; charset=utf-8' # HTML-only is evil, but xnntp generates Markdown for us
+				}
 				if head
 					format_hash(result) { |head|
-						hash.merge!(:head => head)
+						hash[:head].merge!(head)
 						if result['tbl'] == table_name('posts')
 							get_categories(result) { |cat|
 								hash[:head][:keywords] = cat[0] if (cat = cat.fetch_row)
@@ -298,6 +302,31 @@ class WordPressBackend
 			h[:references] = ref.flatten if ref.length > 0
 			yield h
 		}
+	end
+
+	def format_body(body)
+		# This function mostly does the auto-p from wordpress
+		body.force_encoding('utf-8') << "\n" # Force encoding because mysqlplus lies
+		allblocks = '(?:table|thead|tfoot|caption|col|colgroup|tbody|tr|td|th|div|dl|dd|dt|ul|ol|li|pre|select|option|form|map|area|blockquote|address|math|style|input|p|h[1-6]|hr|fieldset|legend|section|article|aside|hgroup|header|footer|nav|figure|figcaption|details|menu|summary)'
+		body.gsub!(/(<#{allblocks}[^>]*>)/, "\n\\1")
+		body.gsub!(/(<\/#{allblocks}>)/, "\\1\n\n")
+		body.gsub!(/\r\n|\r/, "\n")
+		body.gsub!(/\s*<param([^>]*)>\s*/, '<param\1>')
+		body.gsub!(/\s*<\/embed>\s*/, '</embed>')
+		body.gsub!(/\n\n+/, "\n\n")
+		body = body.split(/\n\s*\n/).reject {|p| p.to_s =~ /^\s*$/}.map {|p|
+			"<p>#{p.strip}</p>"
+		}.join("\n")
+		body.gsub!(/<p>([^<]+)<\/(div|address|form)>/, '<p>\1</p></\2>')
+		body.gsub!(/<p>\s*(<\/?#{allblocks}[^>]*>)\s*<\/p>/, '\1')
+		body.gsub!(/<p>(<li.+?)<\/p>/, '\1')
+		body.gsub!(/<p><blockquote([^>]*)>/i, '<blockquote\1><p>')
+		body.gsub!(/<\/blockquote><\/p>/, '</p></blockquote>')
+		body.gsub!(/<p>\s*(<\/?#{allblocks}[^>]*>)/, '\1')
+		body.gsub!(/(<\/?#{allblocks}[^>]*>)\s*<\/p>/, '\1')
+		# This is probably messing up <pre> tags. WordPress has code to fix that, should port it
+		body.gsub!(/\n<\/p>$/, '</p>')
+		body
 	end
 
 	def get_group_stats(g, &blk)
