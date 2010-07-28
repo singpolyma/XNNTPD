@@ -374,7 +374,7 @@ class WordPressBackend
 				isNULL(b.id) AND comment_approved='1' AND
 				post_type='post' AND post_status='publish'
 			)
-			ORDER BY datestamp) t", @newsgroup, HOST, HOST))
+			ORDER BY datestamp, ID) t", @newsgroup, HOST, HOST))
 	end
 
 	def table_name(t)
