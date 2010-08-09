@@ -7,12 +7,21 @@ class WordPressBackend
 		@db = EventMachine::MySQL.new(config[:db].merge(:encoding => 'utf8'))
 		@table_prefix = config[:table_prefix]
 		@newsgroup    = config[:newsgroup]
-		@title        = config[:title]
 		@readonly     = config[:readonly]
+		@title   = nil
 		@homeuri = nil
+		@tz      = nil
 		@db.query("SELECT option_value
-			FROM #{table_name('options')} WHERE option_name='home'") { |result|
+			FROM #{table_name('options')} WHERE option_name='blogname' LIMIT 1") { |result|
+			@title = result.fetch_row[0].force_encoding('utf-8')
+		}
+		@db.query("SELECT option_value
+			FROM #{table_name('options')} WHERE option_name='home' LIMIT 1") { |result|
 			@homeuri = URI::parse(result.fetch_row[0])
+		}
+		@db.query("SELECT option_value
+			FROM #{table_name('options')} WHERE option_name='timezone_string' LIMIT 1") { |result|
+			@tz = result.fetch_row[0]
 		}
 		@db.query("
 			CREATE TABLE IF NOT EXISTS wp_newsgroup_meta(
