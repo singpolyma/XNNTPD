@@ -36,7 +36,7 @@ EventMachine::run {
 
 	if DAEMONIZE
 		require 'daemons'
-		Daemons.daemonize
+		Daemons.daemonize(:app_name => "XNNTPD on #{PORT}")
 	end
 
 	EventMachine::start_server '0.0.0.0', PORT, NNTPServer
