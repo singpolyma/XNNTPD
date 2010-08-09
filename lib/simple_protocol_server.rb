@@ -22,10 +22,12 @@ class SimpleProtocolServer < EventMachine::Connection
 	def receive_data(data)
 		data.force_encoding('binary').each_char { |c| # Make no assumptions about the data
 			@buffer += c
-			if @multiline && @buffer[-3..-1] == ".\r\n"
-				@output_q << @multiline.call(@buffer.gsub(/\r?\n?\.\r\n$/, ''))
-				@multiline = false
-				@buffer = ''
+			if @multiline
+				if @buffer[-5..-1] == "\r\n.\r\n" || @buffer == ".\r\n"
+					@output_q << @multiline.call(@buffer.gsub(/\r?\n?\.\r\n$/, ''))
+					@multiline = false
+					@buffer = ''
+				end
 			elsif @buffer[-2..-1] == "\r\n" # Commands are only one line
 				@buffer.chomp!
 				commands.each do |pattern, block|
