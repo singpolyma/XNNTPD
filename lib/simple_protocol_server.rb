@@ -15,6 +15,8 @@ class SimpleProtocolServer < EventMachine::Connection
 		@buffer = ''
 		@multiline = false
 		@output_q = []
+		peer = get_peername[2,6].unpack('nC4')
+		@peer = {:port => peer.shift, :ip => peer.join('.')}
 	end
 
 	def receive_data(data)
