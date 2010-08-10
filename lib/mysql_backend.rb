@@ -152,8 +152,9 @@ class MysqlBackend
 
 	def list(wildmat)
 		get_group_stats(nil) {|groups|
-			# TODO: title, moderated, readonly
-			yield (groups.select { |g| wildmat.match(g[:newsgroup]) })
+			yield (groups.select { |g| wildmat.match(g[:newsgroup]) }.map {|g|
+					g.merge!(:readonly => @readonly)
+				})
 		}
 	end
 
@@ -206,20 +207,22 @@ class MysqlBackend
 		}
 	end
 
-	def get_group_stats(g, &blk)
+	def get_group_stats(g, extra=false, &blk)
 		query("
 			SELECT
 				newsgroup,
 				COUNT(article_number) AS total,
 				IF(MAX(article_number) IS NULL, 0, MAX(article_number)) AS max,
 				IF(MIN(article_number) IS NULL, 0, MIN(article_number)) AS min
+				#{', title, moderated' if extra}
 			FROM
-				meta
+				meta #{'LEFT JOIN newsgroups USING(newsgroup)' if extra}
 			#{prepare("WHERE newsgroup='%s'", g) if g}
 			GROUP BY newsgroup
 			#{"LIMIT 1" if g}") { |result|
 			result = result.all_hashes.map {|h| h.inject({}) {|c, (k, v)|
-				v = v.to_i unless k == 'newsgroup'
+				v = v.to_i unless k == 'newsgroup' || k == 'title'
+				v = (v != 0) if k == 'moderated'
 				c[k.intern] = v
 				c
 			} }
