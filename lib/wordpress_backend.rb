@@ -33,6 +33,19 @@ class WordPressBackend
 			)")
 	end
 
+	def owner(g, &blk)
+		# TODO: pgpkey
+		@db.query("SELECT option_value
+			FROM #{table_name('options')}
+			WHERE option_name='admin_email' LIMIT 1") { |result|
+			yield(:nntp => "#{HOST}/#{g}", :mailto => result.fetch_row[0])
+		}
+	end
+
+	def moderated?(g)
+		yield true # WordPress groups always moderated
+	end
+
 	def group(g, &blk)
 		get_group_stats g, &blk
 	end

@@ -5,18 +5,51 @@ class MysqlBackend
 	def initialize(config)
 		@db = EventMachine::MySQL.new(config[:db].merge(:encoding => 'utf8'))
 		@readonly = config[:readonly]
-		@db.query("
+		query("
+			CREATE TABLE IF NOT EXISTS newsgroups(
+			newsgroup CHAR(150), mailto CHAR(255), nntp CHAR(255),
+			title CHAR(255), moderated TINYINT, pgpkey BLOB
+			)")
+		query("
 			CREATE TABLE IF NOT EXISTS meta(
 			newsgroup CHAR(150), article_number INT, message_id CHAR(150),
 			CONSTRAINT UNIQUE INDEX group_number (newsgroup, article_number),
 			CONSTRAINT UNIQUE INDEX group_id (newsgroup, message_id)
 			)")
-		@db.query("
+		query("
 			CREATE TABLE IF NOT EXISTS articles(
-			message_id CHAR(255) PRIMARY KEY,
+			message_id CHAR(150) PRIMARY KEY,
 			subject CHAR(255), `from` CHAR(255), date INT, `references` CHAR(255),
 			headers TEXT, body TEXT
 			)")
+	end
+
+	def owner(g)
+		query("
+			SELECT mailto, nntp, pgpkey
+			FROM newsgroups
+			WHERE newsgroup='%s'
+			LIMIT 1", g) {|result|
+			if (result = result.fetch_hash)
+				yield format_hash(result)
+			else
+				yield nil
+			end
+		}
+	end
+
+	def moderated?(g)
+		query("
+			SELECT moderated
+			FROM newsgroups
+			WHERE newsgroup='%s'
+			LIMIT 1", g) {|result|
+			if (result = result.fetch_hash)
+				yield result['moderated'].to_i != 0
+			else
+				yield nil
+			end
+		}
 	end
 
 	def group(g, &blk)
