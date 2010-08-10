@@ -1,5 +1,6 @@
 # encoding: utf-8
 require 'em-mysqlplus'
+require 'time'
 require 'uri'
 
 class WordPressBackend
@@ -113,6 +114,101 @@ class WordPressBackend
 		one_article(g, args, false, false, &blk)
 	end
 
+	def post(m)
+		# TODO remember more data (newsgroups header, original mime parts [signatures])
+		return yield nil unless m[:newsgroups].to_s =~ /\b#{@newsgroup}\b/
+		return yield nil if !m[:in_reply_to] # Can only post comments
+		# Get WordPress ID of parent object
+		@db.query(prepare("
+			SELECT tbl,id
+			FROM #{table_name('newsgroup_meta')}
+			WHERE message_id='%s' LIMIT 1", m[:in_reply_to].to_s)) { |result|
+			return yield nil unless (result = result.fetch_hash) # Must comment on valid post
+			hash = {:post_content => if m.html_part
+				# Wordpress should sanitize?
+				m.html_part
+			else
+				m.text_part || m.body
+			end.decoded}
+
+			# Parse out from header
+			if m[:from]
+				hash[:display_name] = m[:from].display_names.first.to_s
+				hash[:user_email] = m[:from].addresses.first.to_s
+			end
+
+			hash[:message_id] = m[:message_id].to_s if m[:message_id]
+
+			# There is always a post date, use now if none given
+			if m[:date]
+				hash[:post_date_gmt] = Time.parse(m[:date].to_s).utc
+			else
+				hash[:post_date_gmt] = Time.now.utc
+			end
+
+			# Horrible hack to convert to a specific timezone
+			tz = ENV['TZ']
+			ENV['TZ'] = @tz
+			hash[:post_date] = hash[:post_date_gmt].localtime
+			if tz
+				ENV['TZ'] = tz
+			else
+				ENV.delete('TZ')
+			end
+
+			hash[:comment_author_url] = (m[:uri] || m[:url] || m[:x_uri] || m[:x_url]).to_s
+			hash[:comment_author_ip] = m[:received_from].to_s
+
+			# Block that gets called when we are ready to insert the data
+			insert = lambda {|hash|
+				finish = lambda { |approved|
+					approved = approved ? (approved.fetch_row ? '1' : '0') : '0'
+					@db.query(prepare("
+						INSERT INTO #{table_name('comments')}
+						(comment_approved, comment_post_ID, comment_parent, comment_author, comment_author_email, comment_author_url, comment_author_ip, comment_date_gmt, comment_date, comment_content)
+						VALUES ('%s', %d, %d, '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
+						approved, hash[:post_parent], hash[:comment_parent].to_i, hash[:display_name], hash[:user_email], hash[:comment_author_url], hash[:comment_author_ip], hash[:post_date_gmt], hash[:post_date], hash[:post_content])) {
+						if hash[:message_id]
+							@db.query(prepare("SELECT comment_ID FROM #{table_name('comments')}
+								WHERE comment_post_ID=%d AND comment_content='%s'
+								ORDER BY comment_ID DESC LIMIT 1", hash[:post_parent], hash[:post_content])) { |result|
+								id = result.fetch_row.first.to_i
+								@db.query(prepare("INSERT INTO #{table_name('newsgroup_meta')}
+									(id, tbl, message_id, newsgroup)
+									VALUES (%d, '#{table_name('comments')}', '%s', '%s')", id, hash[:message_id], @newsgroup)) {
+									yield true
+								}
+							}
+						else
+							yield true
+						end
+					}
+				}
+				if hash[:user_email]
+					@db.query(prepare("SELECT comment_ID
+						FROM #{table_name('comments')}
+						WHERE comment_approved='1' AND comment_author_email='%s' LIMIT 1", hash[:user_email]), &finish)
+				else
+					finish.call(nil)
+				end
+			}
+
+			if result['tbl'] == table_name('comments') # Replying to a comment
+				hash[:comment_parent] = result['id'].to_i
+				@db.query(prepare("
+					SELECT comment_post_ID
+					FROM #{table_name('comments')}
+					WHERE comment_ID=%d LIMIT 1", result['id'].to_i)) { |result|
+					hash[:post_parent] = result.fetch_row[0].to_i
+					insert.call(hash)
+				}
+			else
+				hash[:post_parent] = result['id'].to_i
+				insert.call(hash)
+			end
+		}
+	end
+
 	def ihave(msgid)
 		# Wordpress groups are moderated, no IHAVE allowed
 		yield '437 Transfer rejected; group is moderated'
@@ -168,7 +264,8 @@ class WordPressBackend
 				request << lambda {|&cb| format_hash(h) { |head|
 					cb.call(head.merge(:bytes => h['post_content'].force_encoding('binary').length,
 					                   :lines => h['post_content'].split(/\n/).length,
-					                   :article_number => h['article_number'].to_i))
+					                   :article_number => h['article_number'].to_i,
+					                   :content_type => 'text/html; charset=utf-8'))
 				} }
 			}
 			request.call { |result|
