@@ -3,6 +3,7 @@ $: << File.dirname(__FILE__)
 require 'simple_protocol_server'
 require 'multi'
 require 'time'
+require 'mail'
 begin
 	require 'html2markdown'
 rescue LoadError
@@ -179,9 +180,7 @@ class NNTPServer < SimpleProtocolServer
 	def article(data)
 		article_part(data, :article) { |rtrn|
 			@current_article = rtrn[:article_number]
-			["220 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Article follows (multi-line)"] +
-			format_head(rtrn[:article_number], rtrn[:head]) + [''] +
-			rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
+			["220 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Article follows (multi-line)", rtrn[:mime].encoded]
 		}
 	end
 
@@ -189,8 +188,7 @@ class NNTPServer < SimpleProtocolServer
 	def head(data)
 		article_part(data, :head) { |rtrn|
 			@current_article = rtrn[:article_number]
-			["221 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Headers follow (multi-line)"] +
-			format_head(rtrn[:article_number], rtrn[:head])
+			["221 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Headers follow (multi-line)", rtrn[:mime].header.encoded.sub(/\r\n$/, '')]
 		}
 	end
 
@@ -198,8 +196,7 @@ class NNTPServer < SimpleProtocolServer
 	def body(data)
 		article_part(data, :body) { |rtrn|
 			@current_article = rtrn[:article_number]
-			["222 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Body follows (multi-line)"] +
-			rtrn[:body].gsub(/\r\n/, "\n").gsub(/\r/, "\n").gsub(/\r\n./, "\r\n..").split(/\n/)
+			["222 #{rtrn[:article_number]} #{rtrn[:head][:message_id]} Body follows (multi-line)", rtrn[:mime].body.encoded]
 		}
 	end
 
@@ -215,19 +212,84 @@ class NNTPServer < SimpleProtocolServer
 	def post(data)
 		return '440 Posting not permitted' if readonly?
 		@multiline = lambda {|data|
-			head, body = parse_message(data)
-			return '441 Posting failed' unless head[:newsgroups].to_s != ''
-			success = false
-			# We can have multiple backends, up to one per group, send to them all
-			head[:newsgroups].split(/,\s*/).each {|group|
-				success ||= backend(group).post(:head => head, :body => body)
-			}
-			# We succeeded if any backend did
-			if success
-				'240 Article received OK'
+			m = Mail::Message.new(data)
+			return '441 Posting failed' if m[:newsgroups].to_s.to_s == '' || (m.multipart? && m.text_part.to_s.strip == '')
+			m[:content_type] = 'text/plain; charset=utf-8' unless m[:content_type]
+			return '441 Posting failed' if (!m.multipart? && m[:content_type].to_s !~ /^text\/plain\b/)
+			if m[:path]
+				m[:path] = "#{HOST}!#{m[:path]}"
 			else
-				'441 Posting failed'
+				m[:path] = HOST
 			end
+			m[:received_from] = @peer[:ip]
+			# m[:xref] = nil This can delete all custom headers
+			begin
+				m[:in_reply_to] = m[:references].message_ids.last if m[:references] && !m[:in_reply_to]
+				m[:references] = m[:in_reply_to].to_s if m[:in_reply_to] && (!m[:references] || m[:references].message_ids.last != m[:in_reply_to].to_s)
+			rescue Exception
+				return '411 Posting failed... references/in-reply-to malformed'
+			end
+			# We can have multiple backends, up to one per group, send to them all
+			future { |f|
+				request = Multi.new
+				m[:newsgroups].decoded.split(/,\s*/).each { |group|
+					request << lambda { |&cb|
+						backend(group).moderated?(group) {|moderated|
+							if moderated
+								backend(group).owner(group) {|owner|
+									if owner[:nntp].to_s == '' || \
+									   (owner[:nntp] = URI::parse("nntp://#{owner[:nntp]}")).host != HOST || \
+									   (owner[:nntp].port || 119) != PORT
+										if owner[:nntp].to_s != '' # POST message to "primary" server
+											socket = TCPSocket.new(owner[:nntp].host, owner[:nntp].port || 119)
+											socket.gets # Eat banner
+											socket.print("POST\r\n")
+											if socket.gets.split(/\s+/,2).first.to_i == 340
+												m.transport_encoding = '8bit'
+												m.ready_to_send!
+												socket.print(m.encoded + "\r\n.\r\n")
+												if socket.gets.split(/\s+/,2).first.to_i == 240
+													socket.close
+													cb.call(true)
+												else
+													socket.close
+													cb.call(false)
+												end
+											else
+												socket.close
+												cb.call(false)
+											end
+										else
+											#begin
+												m.transport_encoding = '7bit'
+												m[:to] = owner[:mailto]
+												m.delivery_method :sendmail
+												m.deliver!
+												cb.call(true)
+											#rescue Exception
+											#	cb.call(false)
+											#end
+										end
+									else
+										backend(group).post(m, &cb)
+									end
+								}
+							else
+								backend(group).post(m, &cb)
+							end
+						}
+					}
+				}
+				return '411 No groups match' unless request.length > 0
+				request.call { |rtrn|
+					# We succeeded if any backend did
+					if rtrn.flatten.compact.inject(false) {|c,v| c || v}
+						f.ready_with('240 Article received OK')
+					else
+						f.ready_with('441 Posting failed')
+					end
+				}
+			}
 		}
 		'340 Send article to be posted'
 	end
@@ -237,25 +299,48 @@ class NNTPServer < SimpleProtocolServer
 		return '501 Please pass the message-id' if data.to_s == '' # http://tools.ietf.org/html/rfc3977#section-3.2.1
 		return '436 Posting not permitted' if readonly?
 		# Must check all backends for message-id
-		if BACKENDS.inject(false) {|c, backend| c || backend.exists?(data) }
-			return '435 Article not wanted'
-		end
-		@multiline = lambda {|data|
-			head, body = parse_message(data)
-			return '437 No Newsgroups header' unless head[:newsgroups].to_s != ''
-			success = false
-			# We can have multiple backends, up to one per group, send to them all
-			head[:newsgroups].split(/,\s*/).each {|group|
-				success ||= backend(group).ihave(:head => head, :body => body)
+		future {|f|
+			each_backend { |backend, &cb| backend.stat(nil, :message_id => data, &cb) }.call {|result|
+				if result.flatten.compact.length > 0
+					f.ready_with('435 Article not wanted')
+				else
+					@multiline = lambda {|data|
+						m = Mail::Message.new(data)
+						return '437 No Newsgroups header' if m[:newsgroups].to_s == ''
+						return '437 No text/plain part' if (m.multipart? && m.text_part.to_s.strip == '')
+						if m[:path]
+							m[:path] = "#{HOST}!#{m[:path]}"
+						else
+							m[:path] = HOST
+						end
+						m[:received_from] = @peer[:ip]
+						# m[:xref] = nil This can delete all custom headers
+						begin
+							m[:in_reply_to] = m[:references].message_ids.last if m[:references] && !m[:in_reply_to]
+							m[:references] = m[:in_reply_to].to_s if m[:in_reply_to] && (!m[:references] || m[:references].message_ids.last != m[:in_reply_to].to_s)
+						rescue Exception
+							return '437 Transfer failed... references/in-reply-to malformed'
+						end
+						# We can have multiple backends, up to one per group, send to them all
+						future {|f|
+							request = Multi.new
+							head[:newsgroups].split(/,\s*/).each {|group|
+								request << lambda {|backend, &cb| backend(group).ihave(m, &cb) }
+							}
+							# We succeeded if any backend did
+							request.call {|rtrn|
+								if rtrn.flatten.compact.inject(false) {|c,v| c || v}
+									f.ready_with('235 Article transferred OK')
+								else
+									f.ready_with('437 Transfer rejected; do not try again')
+								end
+							}
+						}
+					}
+					f.ready_with('335 Send article to be transferred')
+				end
 			}
-			# We succeeded if any backend did
-			if success
-				'235 Article transferred OK'
-			else
-				'437 Transfer rejected; do not try again'
-			end
 		}
-		'335 Send article to be transferred'
 	end
 
 	# http://tools.ietf.org/html/rfc3977#section-7.1
@@ -392,7 +477,7 @@ class NNTPServer < SimpleProtocolServer
 				each_backend { |backend, &cb|
 					backend.hdr(@current_group, field, :message_id => range, &cb)
 				}.call { |heads|
-					head = heads.flatten.compact.first || {}
+					head = hash_to_mime(:head => heads.flatten.compact.first || {})[:mime]
 					f.ready_with(['225 Headers follow (multi-line)', "0 #{format_head_value(head[field])}"])
 				}
 			}
@@ -402,6 +487,7 @@ class NNTPServer < SimpleProtocolServer
 			future {|f|
 				backend(@current_group).hdr(@current_group, field, :article_number => range) {|hdrs|
 					f.ready_with(['225 Headers follow (multi-line)'] + ((hdrs || []).compact.map {|head|
+						head = hash_to_mime(:head => head)[:mime]
 						next if head[field].to_s == ''
 						"#{head[:article_number]} #{format_head_value(head[field])}"
 					}))
@@ -436,7 +522,7 @@ class NNTPServer < SimpleProtocolServer
 	end
 
 	def format_head(article_number, hash)
-		fixup_headers(article_number, hash).map {|k,v|
+		hash.map {|k,v|
 			next unless v
 			"#{k.to_s.gsub(/_/, '-').capitalize}: #{format_head_value(v)}".encode('utf-8')
 		}
@@ -456,15 +542,35 @@ class NNTPServer < SimpleProtocolServer
 		headers
 	end
 
-	def fix_content_type(msg)
-		if !msg[:head][:content_type]
-			msg[:head][:content_type] = 'text/plain; charset=utf-8'
-		elsif msg[:head][:content_type] =~ /^text\/html\b/i
-			# TODO: real MIME
-			msg[:head][:content_type] = 'text/plain; charset=utf-8'
-			msg[:body] = HTML2Markdown.new(msg[:body]).to_s if msg[:body]
+	def hash_to_mime(msg)
+		msg[:body] = '' unless msg[:body]
+		msg[:head] = fixup_headers(msg[:article_number], msg[:head])
+
+		charset = msg[:body].encoding.name
+		msg[:head][:content_type] = "text/plain; charset=#{charset}" if !msg[:head][:content_type]
+		m = Mail::Message.new(msg[:head].inject({}) {|c, (k,v)|
+			v = v.join(', ') if v.respond_to?:join
+			c[k] = v.to_s
+			c
+		})
+		if msg[:head][:content_type] =~ /^text\/html\b/i
+			m.text_part {
+				content_type "text/plain; charset=#{charset}"
+				body HTML2Markdown.new(msg[:body]).to_s
+			}
+			m.html_part {
+				content_type "text/html; charset=#{charset}"
+				body msg[:body]
+			}
+			boundary = "--==_mimepart_#{msg[:head][:message_id]}_#{msg[:article_number]}"[0..70]
+			m.header['content-type'].parameters[:boundary] = boundary
+			m.body.boundary = boundary
+		else
+			m.body = msg[:body]
 		end
-		msg
+		m.transport_encoding = '8bit'
+		m.ready_to_send! # Sets up sub components, etc
+		msg.merge({:mime => m})
 	end
 
 	def article_part(data, method)
@@ -475,7 +581,7 @@ class NNTPServer < SimpleProtocolServer
 				}.call { |rtrn|
 					rtrn = rtrn.flatten.compact.first
 					if rtrn
-						f.ready_with(yield fix_content_type(rtrn))
+						f.ready_with(yield hash_to_mime(rtrn))
 					else
 						f.ready_with('430 No article with that message-id')
 					end
@@ -489,31 +595,13 @@ class NNTPServer < SimpleProtocolServer
 			future { |f|
 				method.call(@current_group, :article_number => data.to_i) { |rtrn|
 					if rtrn
-						f.ready_with(yield fix_content_type(rtrn))
+						f.ready_with(yield hash_to_mime(rtrn))
 					else
 						f.ready_wih('423 No article with that number')
 					end
 				}
 			}
 		end
-	end
-
-	def parse_message(data)
-		head, body = data.split(/\r\n\r\n/, 2)
-		# Headers are specced to be UTF-8, body may be different based on MIME
-		headers = []
-		head.force_encoding('utf-8').split(/\r\n/).each {|line|
-			if line[0] =~ /\s/ && headers.last # folded header
-				headers.last[1] += line
-			else
-				line = line.split(/:\s*/, 2)
-				line[0] = line.first.downcase.gsub(/-/, '_').intern
-				headers << line
-			end
-		}
-		headers = Hash[headers] # Convert to hash (was array for ordering for folding)
-		body.to_s.gsub!(/\r\n../, "\r\n.")
-		[headers, body]
 	end
 
 	def parse_wildmat(wildmat)
