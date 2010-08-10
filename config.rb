@@ -1,3 +1,4 @@
-PORT = 9090
+HOST = 'localhost' # XXX: Change this to your host
+PORT = 119
 DAEMONIZE = false
-NNTPServer::BACKENDS = {} # TODO: Actual backends, this will crash
+NNTPServer::BACKENDS = {} # XXX: Add in the actual backends you want to use
