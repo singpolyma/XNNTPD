@@ -1,5 +1,6 @@
 # encoding: utf-8
 require 'em-mysqlplus'
+require 'time'
 
 class MysqlBackend
 	def initialize(config)
@@ -120,7 +121,47 @@ class MysqlBackend
 	end
 
 	def post(m)
+		# We can assume that the message does belong to one or more of our groups if it's here
+		# Messages that fail policy checks should be sent elsewhere
 		# m.header.fields.map
+		m[:message_id] ||= '<' + Mail::random_tag + '@' + HOST + '>'
+		headers = m.header.fields.map { |head|
+			unless [:message_id, :'message-id', :subject, :from, :date, :references].index(head.name.downcase.intern)
+				"#{head.name}: #{head.decoded}"
+			end
+		}.compact.join("\r\n")
+		groups = m[:newsgroups].to_s.split(/,\s*/).map {|n| prepare("'%s'", n)}.join(', ')
+		query("
+			SELECT
+				newsgroup,
+				IF(MAX(article_number) IS NULL, 0, MAX(article_number)) AS max,
+				moderated, nntp
+			FROM meta LEFT JOIN newsgroups USING (newsgroup)
+			WHERE newsgroup IN (#{groups})
+			GROUP BY newsgroup") {|nums|
+			request = Multi.new
+			nums.all_hashes.each {|num|
+				# Skip any moderated groups we don't manage
+				next if num['moderated'].to_i != 0 && num['nntp'].split('/',2)[1] != HOST
+				# XXX: There's an ugly race condition on the article number...
+				request << lambda {|&cb|
+					query("INSERT INTO meta VALUES('%s', %d, '%s')",
+					num['newsgroup'], num['max'].to_i + 1, m[:message_id]) {
+						cb.call
+					}
+				}
+				request << lambda {|&cb|
+					query("INSERT INTO articles VALUES('%s', '%s', '%s', %d, '%s', '%s', '%s')",
+					m[:message_id], m[:subject], m[:from], Time.parse(m[:date].to_s),
+					m[:references], headers, m.body) {
+						cb.call
+					}
+				}
+			}
+			request.call {
+				yield true
+			}
+		}
 	end
 
 	def ihave(m, &cb)
@@ -151,7 +192,7 @@ class MysqlBackend
 
 
 	def list(wildmat)
-		get_group_stats(nil) {|groups|
+		get_group_stats(nil, true) {|groups|
 			yield (groups.select { |g| wildmat.match(g[:newsgroup]) }.map {|g|
 					g.merge!(:readonly => @readonly)
 				})
@@ -198,7 +239,11 @@ class MysqlBackend
 				h[:head].delete(:article_number)
 				h[:body] = h[:head][:body]
 				h[:head].delete(:body)
-				h[:head].merge!(Hash[h[:head][:headers].to_s.split(/\r?\n/).map {|v| v.split(/:\s*/)}])
+				h[:head].merge!(Hash[h[:head][:headers].to_s.split(/\r?\n/).map {|v|
+					v = v.split(/:\s*/, 2)
+					next if v[1].to_s == ''
+					v
+				}])
 				h[:head].delete(:headers)
 				yield h
 			else
@@ -236,6 +281,7 @@ class MysqlBackend
 
 	def format_hash(h, g=nil)
 		r = h.inject({}) {|c, (k, v)|
+			next c if v.to_s == ''
 			k = k.intern
 			c[k] = v.force_encoding('utf-8')
 			c
