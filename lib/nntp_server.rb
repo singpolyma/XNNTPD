@@ -1,8 +1,9 @@
 # encoding: utf-8
 $: << File.dirname(__FILE__)
-require 'simple_protocol_server'
-require 'multi'
 require 'time'
+
+require 'em-http'
+require 'openpgp'
 require 'mail'
 begin
 	require 'html2markdown'
@@ -13,6 +14,9 @@ rescue LoadError
 		def to_s; @s.gsub(/<[^>]+>/, "\n"); end
 	end
 end
+
+require 'simple_protocol_server'
+require 'multi'
 
 class NNTPServer < SimpleProtocolServer
 	# Hash of pattern => object backends must be in NNTP_BACKENDS
@@ -229,8 +233,24 @@ class NNTPServer < SimpleProtocolServer
 			rescue Exception
 				return '411 Posting failed... references/in-reply-to malformed'
 			end
-			# We can have multiple backends, up to one per group, send to them all
 			future { |f|
+				# Handle control messages
+				if m[:supersedes].to_s.to_s != ''
+					m[:control] = "cancel #{m[:supersedes].decoded}"
+				end
+				if m[:control].to_s.to_s != ''
+					r = control_message(m, :post) {|r|
+						if r.is_a?(String)
+							f.ready_with("441 #{r}")
+						elsif r
+							f.ready_with('240 Control message transfer OK')
+						else
+							f.ready_with('441 Control message rejected')
+						end
+					}
+					next r unless m[:supersedes] # Continue processing supersedes messages
+				end
+				# We can have multiple backends, up to one per group, send to them all
 				request = Multi.new
 				m[:newsgroups].decoded.split(/,\s*/).each { |group|
 					request << lambda { |&cb|
@@ -260,15 +280,15 @@ class NNTPServer < SimpleProtocolServer
 												cb.call(false)
 											end
 										else
-											#begin
+											begin
 												m.transport_encoding = '7bit'
 												m[:to] = owner[:mailto]
 												m.delivery_method :sendmail
 												m.deliver!
 												cb.call(true)
-											#rescue Exception
-											#	cb.call(false)
-											#end
+											rescue Exception
+												cb.call(false)
+											end
 										end
 									else
 										backend(group).post(m, &cb)
@@ -304,6 +324,22 @@ class NNTPServer < SimpleProtocolServer
 				if result.flatten.compact.length > 0
 					f.ready_with('435 Article not wanted')
 				else
+					# Handle control messages
+					if m[:supersedes].to_s.to_s != ''
+						m[:control] = "cancel #{m[:supersedes].decoded}"
+					end
+					if m[:control].to_s.to_s != ''
+						r = control_message(m, :ihave) {|r|
+							if r.is_a?(String)
+								f.ready_with("437 #{r}")
+							elsif r
+								f.ready_with('235 Control message transfer OK')
+							else
+								f.ready_with('437 Control message rejected')
+							end
+						}
+						next r unless m[:supersedes] # Continue processing Supersedes messages
+					end
 					@multiline = lambda {|data|
 						m = Mail::Message.new(data)
 						return '437 No Newsgroups header' if m[:newsgroups].to_s == ''
@@ -325,7 +361,24 @@ class NNTPServer < SimpleProtocolServer
 						future {|f|
 							request = Multi.new
 							head[:newsgroups].split(/,\s*/).each {|group|
-								request << lambda {|backend, &cb| backend(group).ihave(m, &cb) }
+								request << lambda { |&cb|
+									backend(group).moderated?(group) {|moderated|
+										if moderated
+											backend(group).owner(group) { |owner|
+												pgpverify(m, owner[:pgpkey],
+													['Newsgroups', 'Subject', 'Message-ID', 'Date']) { |verified|
+													if verified
+														backend(group).ihave(m, &cb)
+													else
+														cb.call(false)
+													end
+												}
+											}
+										else
+											backend(group).ihave(m, &cb)
+										end
+									}
+								}
 							}
 							# We succeeded if any backend did
 							request.call {|rtrn|
@@ -571,6 +624,148 @@ class NNTPServer < SimpleProtocolServer
 		m.transport_encoding = '8bit'
 		m.ready_to_send! # Sets up sub components, etc
 		msg.merge({:mime => m})
+	end
+
+	def control_message(m, method=:post, &cb)
+		command = m[:control].decoded.strip.split(/\s+/)
+		process = lambda { |key| begin
+			raise 'OpenPGP signature did not verify' unless key
+			case command[0].downcase
+				when 'newgroup'
+					nntp = begin
+						nntp = URI::parse(m[:uri].decoded)
+						if nntp.scheme.downcase == 'nntp'
+							"#{nntp.host}#{":#{nntp.port}" if nntp.port && nntp.port != 119}/#{command[1]}"
+						else
+							nil
+						end
+					rescue Exception
+					end
+					title = if (title = m.body.decoded.scan(/^\s*#{command[1]}\s+(.+)$/i))
+						title[0][0] if title[0]
+					end
+					backend(command[1]).newgroup(command[1],
+						{:nntp     => nntp,
+						:mailto    => m[:from].addresses.first,
+						:title     => title,
+						:moderated => (command[2].to_s.downcase == 'moderated'),
+						:pgpkey    => key.to_s},
+						&cb)
+				when 'rmgroup'
+					backend(command[1]).rmgroup(command[1], &cb)
+				when 'cancel'
+					each_backend { |backend, &cb| backend.cancel(command[1], &cb) }.call { |r|
+						cb.call(r.flatten.inject(false) { |c,v| c || v })
+					}
+				else
+					raise 'Unrecognized command in control message'
+			end
+		rescue Exception
+			cb.call($!.message)
+			EventMachine::DefaultDeferrable.new
+		end }
+
+		if command[0].downcase == 'cancel'
+			# TODO: Also PGPVERIFY to be from key that signed original message using PGP/MIME (if any)
+			# TODO: This also happens on Supersedes, in that case allow PGP/MIME matching original
+			return cb.call('No X-PGP-Sig found')
+		elsif m[:x_pgp_sig]
+			backend(command[1]).owner(command[1]) {|owner|
+				if owner && owner[:pgpkey]
+					pgpverify(m, owner[:pgpkey], &process)
+				elsif command[0].downcase == 'newgroup'
+					pgpverify(m, &process)
+				else
+					process.call(nil)
+				end
+			}
+		else
+			return cb.call('No X-PGP-Sig found')
+		end
+
+		EventMachine::DefaultDeferrable.new
+	end
+
+	# PGPVERIFY <ftp://ftp.isc.org/pub/pgpcontrol/FORMAT>
+	# yields nil (no key found), false (signature verify failed), or OpenPGP::Packet::PublicKey
+	def pgpverify(m, keys=nil, required_headers=['From', 'Control', 'URI'], header=:x_pgp_sig)
+		# TODO: cache keys
+		# TODO: check self-sig and expiration/revocation
+		version, headers, sig = m[header].decoded.split(/\s+/,3)
+		headers = headers.split(',')
+		return yield false unless required_headers.inject(true) {|c, h| c && headers.grep(/^#{h}$/i).length > 0}
+
+		sig.sub!(/=.+$/,'') # Chop off ASCII armour checksum if present
+		sig = sig.unpack('m').first # unpack ignores garbage like whitespace
+		sig = OpenPGP::Message.parse(sig).signature_and_data[0]
+
+		expires = sig.hashed_subpackets.select {|p|
+			p.is_a?(OpenPGP::Packet::Signature::SignatureExpirationTime)
+		}.map {|p| p.data}.sort.first
+
+		if expires && expires.to_i > 0
+			created = sig.hashed_subpackets.select {|p|
+				p.is_a?(OpenPGP::Packet::Signature::SignatureCreationTime)
+			}.map {|p| p.data}.sort.reverse.first
+			return yield false unless created && (created.to_i + expires.to_i) < Time.now.to_i
+		end
+
+		finish = proc { |keys|
+			keys = keys.select {|p| p.algorithm == 1 && p.fingerprint =~ /#{sig.issuer}$/i } if keys # We only support RSA for now
+			if keys
+				head = headers.map {|h| "#{h}: #{m[h] ? m[h].decoded : ''}\r\n"}.join
+				data = OpenPGP::Packet::LiteralData.new(:format => :u, :data =>
+					"X-Signed-Headers: #{headers.join(',')}\r\n#{head}\r\n#{m.body.decoded}\r\n")
+				if OpenPGP::Engine::OpenSSL::RSA.new(keys.first).verify(OpenPGP::Message.new(sig, data))
+					yield keys.first
+				else
+					yield false
+				end
+			else
+				yield nil
+			end
+		}
+
+		if keys
+			finish.call(keys)
+		else
+			each_keyserver((sig.hashed_subpackets.map {|p|
+				p.is_a?(OpenPGP::Packet::Signature::PreferredKeyServer) ? p.body : nil
+			}.compact) + ["hkp://#{HKP_KEYSERVER}"], sig.issuer, &finish)
+		end
+	rescue Exception
+		yield nil
+	end
+
+	def each_keyserver(keyservers, issuer, &cb)
+		return cb.call(nil) unless keyservers.length > 0
+		if (keyserver = keyservers.shift) =~ /^http/i
+			http = EventMachine::HttpRequest.new(keyserver).get :redirects => 1
+		elsif keyserver =~ /^hkp/i
+			http = EventMachine::HttpRequest.new( \
+				"http://#{keyserver.sub(/^hkp:?\/*/,'').sub(/\/*$/,'')}:11371/pks/lookup").get \
+				:redirects => 1, :query => {:search => "0x#{issuer}",
+					:op => 'get', :exact => 'on', :options => 'mr'}
+		else
+			each_keyserver(keyservers, issuer, &cb) # Skip unrecognized keyserver type
+		end
+		http.callback {
+			begin
+				keys = OpenPGP::Message.parse(OpenPGP::dearmor(http.response)).select {|p|
+					p.is_a?(OpenPGP::Packet::PublicKey) && p.fingerprint =~ /#{issuer}$/i
+				}
+				if keys.length > 0 # Found some keys, send them back
+					cb.call(keys)
+				else
+					each_keyserver(keyservers, issuer, &cb)
+				end
+			rescue Exception
+				each_keyserver(keyservers, issuer, &cb)
+			end
+		}
+		http.errback {
+			each_keyserver(keyservers, issuer, &cb)
+		}
 	end
 
 	def article_part(data, method)

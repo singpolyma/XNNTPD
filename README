@@ -7,6 +7,9 @@ This server will conform strictly to at least RFC3977.  Provided backends will c
 == Dependencies ==
 
 * EventMachine
+* EM-HTTP-Request
+** Addressable
+* Mail (use github.com/singpolyma/mail to remove activesupport dependency on 1.9)
+* OpenPGP.rb (github.com/singpolyma/openpgp)
 * Daemons (only if you want to daemonize)
 * HTML2Markdown (if you use backends that store HTML only)
-* Mail (use github.com/singpolyma/mail to remove activesupport dependency on 1.9)
