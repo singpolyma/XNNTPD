@@ -713,6 +713,7 @@ class NNTPServer < SimpleProtocolServer
 		finish = proc { |keys|
 			keys = keys.select {|p| p.algorithm == 1 && p.fingerprint =~ /#{sig.issuer}$/i } if keys # We only support RSA for now
 			if keys
+				DB.query("INSERT IGNORE INTO `keys` VALUES('#{keys.first.fingerprint.upcase}', '#{Mysql::escape_string(keys.first.to_s.force_encoding('binary'))}')")
 				head = headers.map {|h| "#{h}: #{m[h] ? m[h].decoded : ''}\r\n"}.join
 				data = OpenPGP::Packet::LiteralData.new(:format => :u, :data =>
 					"X-Signed-Headers: #{headers.join(',')}\r\n#{head}\r\n#{m.body.decoded}\r\n")
@@ -729,9 +730,15 @@ class NNTPServer < SimpleProtocolServer
 		if keys
 			finish.call(keys)
 		else
-			each_keyserver((sig.hashed_subpackets.map {|p|
-				p.is_a?(OpenPGP::Packet::Signature::PreferredKeyServer) ? p.body : nil
-			}.compact) + ["hkp://#{HKP_KEYSERVER}"], sig.issuer, &finish)
+			DB.query("SELECT `key` FROM `keys` WHERE fingerprint LIKE '%#{sig.issuer.upcase}'") { |r|
+				if key = r.fetch_row
+					finish.call(OpenPGP::Message.parse(key[0]))
+				else
+					each_keyserver((sig.hashed_subpackets.map {|p|
+						p.is_a?(OpenPGP::Packet::Signature::PreferredKeyServer) ? p.body : nil
+					}.compact) + ["hkp://#{HKP_KEYSERVER}"], sig.issuer, &finish)
+				end
+			}
 		end
 	rescue Exception
 		yield nil

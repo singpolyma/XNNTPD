@@ -1,5 +1,6 @@
 $: << File.dirname(__FILE__) + '/lib'
 require 'nntp_server'
+require 'em-mysqlplus'
 require 'optparse'
 
 EventMachine::run {
@@ -38,6 +39,9 @@ EventMachine::run {
 		require 'daemons'
 		Daemons.daemonize(:app_name => "XNNTPD on #{PORT}")
 	end
+
+	DB = EventMachine::MySQL.new(MYSQL.merge(:encoding => 'utf8'))
+	DB.query("CREATE TABLE IF NOT EXISTS `keys` (fingerprint CHAR(40) PRIMARY KEY, `key` BLOB)")
 
 	EventMachine::start_server '0.0.0.0', PORT, NNTPServer
 }
