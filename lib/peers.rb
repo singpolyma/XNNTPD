@@ -65,6 +65,15 @@ end
 
 def send_ihave(db, peer, m)
 	uri = URI::parse(peer)
+	# Skip sending if path header says it's been there
+	if m[:mime] && m[:mime][:path] && \
+		(m[:mime][:path].decoded == uri.host || \
+		m[:mime][:path].decoded == "#{uri.host}:#{uri.port}")
+		db.query("INSERT INTO messages_sent VALUES
+					('#{Mysql::escape_string(m[:message_id])}',
+					 '#{Mysql::escape_string(peer)}')")
+		return nil
+	end
 	EventMachine::connect(uri.host, uri.port || 119, IHAVEClient) { |nntp|
 		nntp.command(:ihave, m) { |success|
 			if success # We sent the message, record that fact
@@ -104,12 +113,12 @@ end
 
 def process_peers(peers, db, log, time=60)
 	process = lambda {
-			request = Multi.new
-			peers.each { |peer|
-				request << lambda {|&cb|
-					db.query("SELECT messages.message_id,newsgroup,encoded FROM messages LEFT JOIN messages_sent
-					          ON messages.message_id=messages_sent.message_id AND messages_sent.server='#{peer}'
-					          WHERE isNULL(server) AND isNULL(post_peer) LIMIT 20") { |result|
+		request = Multi.new
+		peers.each { |peer|
+			request << lambda {|&cb|
+				db.query("SELECT messages.message_id,newsgroup,encoded FROM messages LEFT JOIN messages_sent
+				          ON messages.message_id=messages_sent.message_id AND messages_sent.server='#{peer}'
+				          WHERE isNULL(server) AND isNULL(post_peer) LIMIT 20") { |result|
 					result.all_hashes.each {|r|
 						get_article(r) {|m|
 							log.info "IHAVE #{m[:message_id]} to #{peer}"
