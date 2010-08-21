@@ -27,7 +27,7 @@ module Util
 		          '#{Mysql::escape_string(m[:newsgroup])}')") if m[:message_id]
 	end
 
-	def backend(group)
+	def backend(group=@current_group)
 		BACKENDS.each do |pattern, backend|
 			return backend if pattern === group
 		end
