@@ -292,24 +292,24 @@ class NNTPServer < SimpleProtocolServer
 				if result.flatten.compact.length > 0
 					f.ready_with('435 Article not wanted')
 				else
-					# Handle control messages
-					if m[:supersedes].to_s.to_s != ''
-						m[:control] = "cancel #{m[:supersedes].decoded}"
-					end
-					if m[:control].to_s.to_s != ''
-						r = control_message(m, :ihave) {|r|
-							if r.is_a?(String)
-								f.ready_with("437 #{r}")
-							elsif r
-								f.ready_with('235 Control message transfer OK')
-							else
-								f.ready_with('437 Control message rejected')
-							end
-						}
-						next r unless m[:supersedes] # Continue processing Supersedes messages
-					end
 					@multiline = lambda {|data|
 						m = Mail::Message.new(data)
+						# Handle control messages
+						if m[:supersedes].to_s.to_s != ''
+							m[:control] = "cancel #{m[:supersedes].decoded}"
+						end
+						if m[:control].to_s.to_s != ''
+							r = control_message(m, :ihave) {|r|
+								if r.is_a?(String)
+									f.ready_with("437 #{r}")
+								elsif r
+									f.ready_with('235 Control message transfer OK')
+								else
+									f.ready_with('437 Control message rejected')
+								end
+							}
+							next r unless m[:supersedes] # Continue processing Supersedes messages
+						end
 						return '437 No Newsgroups header' if m[:newsgroups].to_s == ''
 						return '437 No text/plain part' if (m.multipart? && m.text_part.to_s.strip == '')
 						if m[:path]
