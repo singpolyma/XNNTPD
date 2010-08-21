@@ -3,6 +3,11 @@ require 'nntp_server'
 require 'em-mysqlplus'
 require 'optparse'
 
+
+EventMachine::error_handler { |e|
+	LOG.error e.message
+}
+
 EventMachine::run {
 	eval(open(
 		if File.readable?(File.dirname(__FILE__) + '/config.rb')
@@ -13,6 +18,14 @@ EventMachine::run {
 			}.first + '/xnntpd/config.rb'
 		end
 	).read)
+
+	unless defined?(LOG)
+		LOG = Class.new {
+			def method_missing(*args)
+				p args
+			end
+		}.new
+	end
 
 	OptionParser.new do |opts|
 		opts.banner = "Usage: run.rb [options]"
