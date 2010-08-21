@@ -15,6 +15,7 @@ class MysqlBackend
 		query("
 			CREATE TABLE IF NOT EXISTS meta(
 			newsgroup CHAR(150), article_number INT, message_id CHAR(150),
+			approved TINYINT,
 			CONSTRAINT UNIQUE INDEX group_number (newsgroup, article_number),
 			CONSTRAINT UNIQUE INDEX group_id (newsgroup, message_id)
 			)")
@@ -84,6 +85,7 @@ class MysqlBackend
 			FROM
 				meta
 			WHERE
+				approved=1 AND
 				newsgroup='%s' #{range_to_sql('article_number', range)}
 			ORDER BY article_number", g) { |result|
 			list = []
@@ -98,6 +100,7 @@ class MysqlBackend
 		FROM
 			meta
 		WHERE
+			approved=1 AND
 			newsgroup='%s' AND article_number < %d
 		ORDER BY
 			article_number DESC
@@ -114,6 +117,7 @@ class MysqlBackend
 		FROM
 			meta
 		WHERE
+			approved=1 AND
 			newsgroup='%s' AND article_number > %d
 		ORDER BY
 			article_number ASC
@@ -158,17 +162,18 @@ class MysqlBackend
 				newsgroup,
 				IF(MAX(article_number) IS NULL, 0, MAX(article_number)) AS max,
 				moderated, nntp
-			FROM meta LEFT JOIN newsgroups USING (newsgroup)
+			FROM newsgroups LEFT JOIN meta USING (newsgroup)
 			WHERE newsgroup IN (#{groups})
 			GROUP BY newsgroup") {|nums|
 			request = Multi.new
 			nums.all_hashes.each {|num|
 				# Skip any moderated groups we don't manage
-				next if num['moderated'].to_i != 0 && num['nntp'].split('/',2)[1] != HOST
+				next if num['moderated'].to_i != 0 && num['nntp'].split('/',2)[0] != HOST + (PORT != 119 ? ":#{PORT}" : '')
 				# XXX: There's an ugly race condition on the article number...
 				request << lambda {|&cb|
-					query("INSERT INTO meta VALUES('%s', %d, '%s')",
-					num['newsgroup'], num['max'].to_i + 1, m[:message_id]) {
+					query("INSERT INTO meta VALUES('%s', %d, '%s', %d)",
+					num['newsgroup'], num['max'].to_i + 1, m[:message_id],
+					num['moderated'].to_i != 0 ? 0 : 1) {
 						cb.call
 					}
 				}
@@ -180,9 +185,11 @@ class MysqlBackend
 					}
 				}
 			}
-			request.call {
-				yield true
-			}
+			if request.length < 1
+				yield false
+			else
+				request.call { yield true }
+			end
 		}
 	end
 
@@ -195,7 +202,7 @@ class MysqlBackend
 			SELECT
 				newsgroup, MIN(date) as start
 			FROM articles LEFT JOIN meta USING(message_id)
-			WHERE date >= %d
+			WHERE approved=1 AND date >= %d
 			GROUP BY newsgroup", datetime) { |result|
 			yield ((result.all_hashes || []).map {|h| h['newsgroup']})
 		}
@@ -205,7 +212,7 @@ class MysqlBackend
 		query("
 			SELECT newsgroup, message_id
 			FROM articles LEFT JOIN meta USING(message_id)
-			WHERE date >= %d", datetime) { |result|
+			WHERE approved=1 AND date >= %d", datetime) { |result|
 			yield ((result.all_hashes || []) \
 				.select {|h| wildmats.match(h['newsgroup'])} \
 				.map {|h| h['message_id']})
@@ -227,7 +234,7 @@ class MysqlBackend
 
 	def over(g, args)
 		stmt = "SELECT article_number, message_id, subject, `from`, date, `references`, headers, body
-		        FROM articles LEFT JOIN meta USING(message_id) WHERE 1=1"
+		        FROM articles LEFT JOIN meta USING(message_id) WHERE approved=1"
 		stmt << prepare(" AND newsgroup='%s'", g) if g
 		stmt << prepare(" AND message_id='%s'", args[:message_id]) if args[:message_id]
 		stmt << range_to_sql('article_number', args[:article_number])
@@ -248,7 +255,7 @@ class MysqlBackend
 		stmt = "SELECT article_number, message_id
 		        #{', subject, `from`, date, `references`, headers' if head}
 		        #{', body' if body}
-		        FROM articles LEFT JOIN meta USING(message_id) WHERE 1=1"
+		        FROM articles LEFT JOIN meta USING(message_id) WHERE approved=1"
 		stmt << prepare(" AND newsgroup='%s'", g) if g
 		stmt << prepare(" AND message_id='%s'", args[:message_id]) if args[:message_id]
 		stmt << range_to_sql('article_number', args[:article_number])
@@ -284,7 +291,9 @@ class MysqlBackend
 				#{', title, moderated' if extra}
 			FROM
 				meta #{'LEFT JOIN newsgroups USING(newsgroup)' if extra}
-			#{prepare("WHERE newsgroup='%s'", g) if g}
+			WHERE
+				approved=1
+				#{prepare("AND newsgroup='%s'", g) if g}
 			GROUP BY newsgroup
 			#{"LIMIT 1" if g}") { |result|
 			result = result.all_hashes.map {|h| h.inject({}) {|c, (k, v)|
@@ -294,7 +303,7 @@ class MysqlBackend
 				c
 			} }
 			if g
-				yield result.first
+				yield result.first || {:total => 0, :max => 0, :min => 0, :newsgroup => g}
 			else
 				yield result
 			end
