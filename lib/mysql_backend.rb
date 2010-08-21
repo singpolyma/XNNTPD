@@ -245,7 +245,12 @@ class MysqlBackend
 
 	def hdr(g, field, args, &cb)
 		over(g, args) { |h|
-			yield h.merge!(Hash[h[:headers].to_s.split(/\r?\n/).map {|v| v.split(/:\s*/)}])
+			h = h.first
+			if h
+				yield h.merge!(Hash[h[:headers].to_s.split(/\r?\n/).map {|v| v.split(/:\s*/)}])
+			else
+				yield nil
+			end
 		}
 	end
 
