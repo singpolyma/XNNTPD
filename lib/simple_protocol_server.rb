@@ -17,6 +17,7 @@ class SimpleProtocolServer < EventMachine::Connection
 		@output_q = []
 		peer = get_peername[2,6].unpack('nC4')
 		@peer = {:port => peer.shift, :ip => peer.join('.')}
+		LOG.info "Connection from #{@peer[:ip]} on port #{@peer[:port]}"
 	end
 
 	def receive_data(data)
@@ -24,12 +25,14 @@ class SimpleProtocolServer < EventMachine::Connection
 			@buffer += c
 			if @multiline
 				if @buffer[-5..-1] == "\r\n.\r\n" || @buffer == ".\r\n"
+					LOG.info "#{@peer[:ip]} #{@buffer}"
 					@output_q << @multiline.call(@buffer.gsub(/\r?\n?\.\r\n$/, ''))
 					@multiline = false
 					@buffer = ''
 				end
 			elsif @buffer[-2..-1] == "\r\n" # Commands are only one line
 				@buffer.chomp!
+				LOG.info "#{@peer[:ip]} #{@buffer}"
 				commands.each do |pattern, block|
 					if pattern === @buffer # If this command matches, defer its block
 						@output_q << block.call(@buffer.gsub(pattern, ''))
