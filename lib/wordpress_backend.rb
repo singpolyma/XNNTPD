@@ -178,7 +178,7 @@ class WordPressBackend
 								@db.query(prepare("INSERT INTO #{table_name('newsgroup_meta')}
 									(id, tbl, message_id, newsgroup)
 									VALUES (%d, '#{table_name('comments')}', '%s', '%s')", id, hash[:message_id], @newsgroup)) {
-									Util::new_article(:mesage_id => hash[:message_id], :newsgroup => @newsgroup)
+									Util::new_article(:message_id => hash[:message_id], :newsgroup => @newsgroup)
 									yield true
 								}
 							}
