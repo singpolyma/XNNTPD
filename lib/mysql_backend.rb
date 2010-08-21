@@ -26,6 +26,25 @@ class MysqlBackend
 			)")
 	end
 
+	# Called to create a new group with the name in g
+	# args may contain any of: nntp (HOST/group_name), mailto (owner email),
+	# title, moderated (bool), pgpkey (binary)
+	def newgroup(g, args)
+		query("
+			INSERT INTO newsgroups
+			VALUES ('%s', '%s', '%s', '%s', %d, '%s')
+		", g, args[:mailto], args[:nntp], args[:title],
+		args[:moderated] ? 1 : 0, args[:pgpkey]) {
+			yield true
+		}
+	end
+
+	def rmgroup(g)
+		query("DELETE FROM newsgroups WHERE newsgroup='%s'", g) {
+			yield true
+		}
+	end
+
 	def owner(g)
 		query("
 			SELECT mailto, nntp, pgpkey
