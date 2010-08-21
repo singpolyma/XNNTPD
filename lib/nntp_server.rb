@@ -238,24 +238,15 @@ class NNTPServer < SimpleProtocolServer
 									   (owner[:nntp] = URI::parse("nntp://#{owner[:nntp]}")).host != HOST || \
 									   (owner[:nntp].port || 119) != PORT
 										if owner[:nntp].to_s != '' # POST message to "primary" server
-											socket = TCPSocket.new(owner[:nntp].host, owner[:nntp].port || 119)
-											socket.gets # Eat banner
-											socket.print("POST\r\n")
-											if socket.gets.split(/\s+/,2).first.to_i == 340
-												m.transport_encoding = '8bit'
-												m.ready_to_send!
-												socket.print(m.encoded + "\r\n.\r\n")
-												if socket.gets.split(/\s+/,2).first.to_i == 240
-													socket.close
-													cb.call(true)
-												else
-													socket.close
-													cb.call(false)
-												end
-											else
-												socket.close
-												cb.call(false)
-											end
+											m.transport_encoding = '8bit'
+											m.ready_to_send!
+											q = DB.query("INSERT INTO messages (message_id, post_peer, encoded) VALUES
+											         ('#{Mysql::escape_string(m[:message_id].decoded)}',
+											          '#{Mysql::escape_string(owner[:nntp].to_s)}',
+											          '#{Mysql::escape_string(m.encoded)}')") {
+												cb.call(true)
+											}
+											q.errback {|e| cb.call(false) }
 										else
 											begin
 												m.transport_encoding = '7bit'
@@ -563,6 +554,11 @@ class NNTPServer < SimpleProtocolServer
 				else
 					raise 'Unrecognized command in control message'
 			end
+			# No exceptions were thrown if we get here
+			DB.query("INSERT INTO messages (message_id,encoded) VALUES(
+			          '#{Mysql::escape_string(m[:message_id])}',
+			          '#{Mysql::escape_string(m.encoded)}')")
+			EventMachine::DefaultDeferrable.new
 		rescue Exception
 			cb.call($!.message)
 			EventMachine::DefaultDeferrable.new

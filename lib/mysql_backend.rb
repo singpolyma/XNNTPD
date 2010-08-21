@@ -1,6 +1,7 @@
 # encoding: utf-8
 require 'em-mysqlplus'
 require 'time'
+require 'util'
 
 class MysqlBackend
 	def initialize(config)
@@ -125,6 +126,8 @@ class MysqlBackend
 		# Messages that fail policy checks should be sent elsewhere
 		# m.header.fields.map
 		m[:message_id] ||= '<' + Mail::random_tag + '@' + HOST + '>'
+		Util::new_article(:mesage_id => m[:message_id].decoded,
+		                        :newsgroup => m[:newsgroups].decoded.split(/,\s*/).first)
 		headers = m.header.fields.map { |head|
 			unless [:message_id, :'message-id', :subject, :from, :date, :references].index(head.name.downcase.intern)
 				"#{head.name}: #{head.decoded}"

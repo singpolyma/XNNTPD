@@ -3,6 +3,8 @@ require 'em-mysqlplus'
 require 'time'
 require 'uri'
 
+require 'util'
+
 class WordPressBackend
 	def initialize(config)
 		@db = EventMachine::MySQL.new(config[:db].merge(:encoding => 'utf8'))
@@ -176,6 +178,7 @@ class WordPressBackend
 								@db.query(prepare("INSERT INTO #{table_name('newsgroup_meta')}
 									(id, tbl, message_id, newsgroup)
 									VALUES (%d, '#{table_name('comments')}', '%s', '%s')", id, hash[:message_id], @newsgroup)) {
+									Util::new_article(:mesage_id => hash[:message_id], :newsgroup => @newsgroup)
 									yield true
 								}
 							}
@@ -468,8 +471,8 @@ class WordPressBackend
 
 	def update_newsgroup_meta
 		# Just run the update in the background. No one is waiting on us to be done
-		@db.query(prepare("INSERT INTO #{table_name('newsgroup_meta')} (id, tbl, message_id, newsgroup)
-			SELECT ID, tbl, message_id, '%s' FROM (
+		@db.query(prepare("
+			SELECT ID, tbl, message_id FROM (
 			(SELECT
 				a.ID, '#{table_name('posts')}' AS tbl,
 				CONCAT('<post-', a.ID, '@%s>') AS message_id,
@@ -493,7 +496,13 @@ class WordPressBackend
 				isNULL(b.id) AND comment_approved='1' AND
 				post_type='post' AND post_status='publish'
 			)
-			ORDER BY datestamp, ID) t", @newsgroup, HOST, HOST))
+			ORDER BY datestamp, ID) t", HOST, HOST)) { |result|
+			values = result.all_hashes.map {|row|
+				Util::new_article(:message_id => row['message_id'], :newsgroup => @newsgroup)
+				prepare("(%d, '%s', '%s', '%s')", row['ID'], row['tbl'], row['message_id'], @newsgroup)
+			}.join(', ')
+			@db.query("INSERT INTO #{table_name('newsgroup_meta')} (id, tbl, message_id, newsgroup) VALUES #{values}")
+		}
 	end
 
 	def table_name(t)

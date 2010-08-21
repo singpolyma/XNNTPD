@@ -1,8 +1,8 @@
+# encoding: utf-8
 $: << File.dirname(__FILE__) + '/lib'
-require 'nntp_server'
-require 'em-mysqlplus'
 require 'optparse'
 
+require 'em-mysqlplus'
 
 EventMachine::error_handler { |e|
 	LOG.error e.message
@@ -55,6 +55,22 @@ EventMachine::run {
 
 	DB = EventMachine::MySQL.new(MYSQL.merge(:encoding => 'utf8'))
 	DB.query("CREATE TABLE IF NOT EXISTS `keys` (fingerprint CHAR(40) PRIMARY KEY, `key` BLOB)")
+	DB.query("CREATE TABLE IF NOT EXISTS messages (message_id CHAR(150) PRIMARY KEY,
+	          newsgroup CHAR(255), post_peer CHAR(255), encoded TEXT)")
+	DB.query("CREATE TABLE IF NOT EXISTS messages_sent (message_id CHAR(150), server CHAR(150),
+	          CONSTRAINT UNIQUE INDEX id_server (message_id, server))")
 
-	EventMachine::start_server '0.0.0.0', PORT, NNTPServer
+	# Define PEERS to have this process send messages to other servers
+	if defined?(PEERS)
+		require 'peers'
+		process_peers(PEERS, DB, LOG)
+	end
+
+	# Define HOST and PORT to have this process accept NNTP connections
+	if defined?(HOST) && defined?(PORT)
+		require 'nntp_server'
+		LOG.info "Started on #{HOST}:#{PORT}"
+
+		EventMachine::start_server '0.0.0.0', PORT, NNTPServer
+	end
 }
