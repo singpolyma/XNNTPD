@@ -328,7 +328,7 @@ class NNTPServer < SimpleProtocolServer
 						# We can have multiple backends, up to one per group, send to them all
 						future {|f|
 							request = Multi.new
-							head[:newsgroups].split(/,\s*/).each {|group|
+							m[:newsgroups].to_s.split(/,\s*/).each {|group|
 								request << lambda { |&cb|
 									backend(group).moderated?(group) {|moderated|
 										if moderated
