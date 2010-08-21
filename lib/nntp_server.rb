@@ -237,6 +237,7 @@ class NNTPServer < SimpleProtocolServer
 									if owner[:nntp].to_s == '' || \
 									   (owner[:nntp] = URI::parse("nntp://#{owner[:nntp]}")).host != HOST || \
 									   (owner[:nntp].port || 119) != PORT
+										LOG.info "Forwarding moderated message on to #{owner.inspect}"
 										if owner[:nntp].to_s != '' # POST message to "primary" server
 											m.transport_encoding = '8bit'
 											m.ready_to_send!
