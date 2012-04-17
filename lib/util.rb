@@ -118,9 +118,8 @@ module Util
 
 	# PGPVERIFY <ftp://ftp.isc.org/pub/pgpcontrol/FORMAT>
 	# yields nil (no key found), false (signature verify failed), or OpenPGP::Packet::PublicKey
+	# Keys are cached in MySQL table `keys`. If no key matching the signature can be found one will be looked up in the keyservers
 	def pgpverify(m, keys=nil, required_headers=['From', 'Control', 'URI'], header=:x_pgp_sig)
-		# TODO: cache keys
-		# TODO: check self-sig and expiration/revocation
 		version, headers, sig = m[header].decoded.split(/\s+/,3)
 		headers = headers.split(',')
 		return yield false unless required_headers.inject(true) {|c, h| c && headers.grep(/^#{h}$/i).length > 0}
@@ -142,6 +141,7 @@ module Util
 
 		finish = proc { |keys|
 			keys = keys.select {|p| p.algorithm == 1 && p.fingerprint =~ /#{sig.issuer}$/i } if keys # We only support RSA for now
+			# TODO: check self-sig and expiration/revocation on the matching key
 			if keys
 				DB.query("INSERT IGNORE INTO `keys` VALUES('#{keys.first.fingerprint.upcase}', '#{Mysql::escape_string(keys.first.to_s.force_encoding('binary'))}')")
 				head = headers.map {|h| "#{h}: #{m[h] ? m[h].decoded : ''}\r\n"}.join
