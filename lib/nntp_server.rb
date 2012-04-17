@@ -566,11 +566,8 @@ class NNTPServer < SimpleProtocolServer
 			EventMachine::DefaultDeferrable.new
 		end }
 
-		if command[0].downcase == 'cancel'
-			# TODO: Also PGPVERIFY to be from key that signed original message using PGP/MIME (if any)
-			# TODO: This also happens on Supersedes, in that case allow PGP/MIME matching original
-			return cb.call('No X-PGP-Sig found')
-		elsif m[:x_pgp_sig]
+		if m[:x_pgp_sig]
+			# TODO: Also PGPVERIFY can be from key that signed original message using PGP/MIME (if any) for cancel/Supersedes
 			backend(command[1]).owner(command[1]) {|owner|
 				if owner && owner[:pgpkey]
 					pgpverify(m, owner[:pgpkey], &process)
