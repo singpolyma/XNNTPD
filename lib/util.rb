@@ -91,7 +91,7 @@ module Util
 
 		charset = msg[:body].encoding.name
 		msg[:head][:content_type] = "text/plain; charset=#{charset}" if !msg[:head][:content_type]
-		m = Mail::Message.new(msg[:head].inject({}) {|c, (k,v)|
+		m = Mail::Message.new(:headers => msg[:head].inject({}) {|c, (k,v)|
 			v = v.join(', ') if v.respond_to?:join
 			c[k] = v.to_s
 			c
