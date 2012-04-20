@@ -207,7 +207,7 @@ class NNTPServer < SimpleProtocolServer
 			# m[:xref] = nil This can delete all custom headers
 			begin
 				m[:in_reply_to] = m[:references].message_ids.last if m[:references] && !m[:in_reply_to]
-				m[:references] = m[:in_reply_to].to_s if m[:in_reply_to] && (!m[:references] || m[:references].message_ids.last != m[:in_reply_to].to_s)
+				m[:references] = m[:in_reply_to].to_s if m[:in_reply_to] && (!m[:references] || m[:references].message_ids.last.gsub(/^<|>$/,'') != m[:in_reply_to].to_s.gsub(/^<|>$/,''))
 			rescue Exception
 				return '411 Posting failed... references/in-reply-to malformed'
 			end
