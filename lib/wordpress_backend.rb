@@ -1,5 +1,5 @@
 # encoding: utf-8
-require 'em-mysqlplus'
+require 'mysql2/em'
 require 'time'
 require 'uri'
 
@@ -7,7 +7,7 @@ require 'util'
 
 class WordPressBackend
 	def initialize(config)
-		@db = EventMachine::MySQL.new(config[:db].merge(:encoding => 'utf8'))
+		@db = Mysql2::EM::Client.new(config[:db].merge(:encoding => 'utf8'))
 		@table_prefix = config[:table_prefix]
 		@newsgroup    = config[:newsgroup]
 		@readonly     = config[:readonly]
@@ -15,16 +15,16 @@ class WordPressBackend
 		@homeuri = nil
 		@tz      = nil
 		@db.query("SELECT option_value
-			FROM #{table_name('options')} WHERE option_name='blogname' LIMIT 1") { |result|
-			@title = result.fetch_row[0].force_encoding('utf-8')
+			FROM #{table_name('options')} WHERE option_name='blogname' LIMIT 1").callback { |result|
+			@title = result.first['option_value']
 		}
 		@db.query("SELECT option_value
-			FROM #{table_name('options')} WHERE option_name='home' LIMIT 1") { |result|
-			@homeuri = URI::parse(result.fetch_row[0])
+			FROM #{table_name('options')} WHERE option_name='home' LIMIT 1").callback { |result|
+			@homeuri = URI::parse(result.first['option_value'])
 		}
 		@db.query("SELECT option_value
-			FROM #{table_name('options')} WHERE option_name='timezone_string' LIMIT 1") { |result|
-			@tz = result.fetch_row[0]
+			FROM #{table_name('options')} WHERE option_name='timezone_string' LIMIT 1").callback { |result|
+			@tz = result.first['option_value']
 		}
 		@db.query("
 			CREATE TABLE IF NOT EXISTS wp_newsgroup_meta(
@@ -40,8 +40,8 @@ class WordPressBackend
 		# TODO: pgpkey
 		@db.query("SELECT option_value
 			FROM #{table_name('options')}
-			WHERE option_name='admin_email' LIMIT 1") { |result|
-			yield(:nntp => "#{HOST}/#{g}", :mailto => result.fetch_row[0])
+			WHERE option_name='admin_email' LIMIT 1").callback { |result|
+			yield(:nntp => "#{HOST}/#{g}", :mailto => result.first['option_value'])
 		}
 	end
 
@@ -61,9 +61,9 @@ class WordPressBackend
 				#{table_name('newsgroup_meta')}
 			WHERE
 				newsgroup='%s' #{range_to_sql('article_number', range)}
-			ORDER BY article_number", g)) { |result|
+			ORDER BY article_number", g)).callback { |result|
 			list = []
-			result.each {|row| list << row[0].force_encoding('utf-8') }
+			result.each {|row| list << row['article_number'] }
 			blk.call(list)
 		}
 	end
@@ -78,8 +78,8 @@ class WordPressBackend
 		ORDER BY
 			article_number DESC
 		LIMIT 1", g, current.to_i)) { |result|
-			yield(if (result = result.fetch_row)
-				{:article_number => result[0].to_i}
+			yield(if (result = result.first)
+				{:article_number => result['article_number']}
 			end)
 		}
 	end
@@ -94,8 +94,8 @@ class WordPressBackend
 		ORDER BY
 			article_number ASC
 		LIMIT 1", g, current.to_i)) { |result|
-			yield(if (result = result.fetch_row)
-				{:article_number => result[0].to_i}
+			yield(if (result = result.first)
+				{:article_number => result['article_number']}
 			end)
 		}
 	end
@@ -124,8 +124,8 @@ class WordPressBackend
 		@db.query(prepare("
 			SELECT tbl,id
 			FROM #{table_name('newsgroup_meta')}
-			WHERE message_id='%s' LIMIT 1", m[:in_reply_to].to_s)) { |result|
-			return yield nil unless (result = result.fetch_hash) # Must comment on valid post
+			WHERE message_id='%s' LIMIT 1", m[:in_reply_to].to_s)).callback { |result|
+			return yield nil unless (result = result.first) # Must comment on valid post
 			hash = {:post_content => if m.html_part
 				# Wordpress should sanitize?
 				m.html_part
@@ -169,15 +169,15 @@ class WordPressBackend
 						INSERT INTO #{table_name('comments')}
 						(comment_approved, comment_post_ID, comment_parent, comment_author, comment_author_email, comment_author_url, comment_author_ip, comment_date_gmt, comment_date, comment_content)
 						VALUES ('%s', %d, %d, '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
-						approved, hash[:post_parent], hash[:comment_parent].to_i, hash[:display_name], hash[:user_email], hash[:comment_author_url], hash[:comment_author_ip], hash[:post_date_gmt], hash[:post_date], hash[:post_content])) {
+						approved, hash[:post_parent], hash[:comment_parent].to_i, hash[:display_name], hash[:user_email], hash[:comment_author_url], hash[:comment_author_ip], hash[:post_date_gmt], hash[:post_date], hash[:post_content])).callback {
 						if hash[:message_id]
 							@db.query(prepare("SELECT comment_ID FROM #{table_name('comments')}
 								WHERE comment_post_ID=%d AND comment_content='%s'
-								ORDER BY comment_ID DESC LIMIT 1", hash[:post_parent], hash[:post_content])) { |result|
-								id = result.fetch_row.first.to_i
+								ORDER BY comment_ID DESC LIMIT 1", hash[:post_parent], hash[:post_content])).callback { |result|
+								id = result.first['comment_ID']
 								@db.query(prepare("INSERT INTO #{table_name('newsgroup_meta')}
 									(id, tbl, message_id, newsgroup)
-									VALUES (%d, '#{table_name('comments')}', '%s', '%s')", id, hash[:message_id], @newsgroup)) {
+									VALUES (%d, '#{table_name('comments')}', '%s', '%s')", id, hash[:message_id], @newsgroup)).callback {
 									Util::new_article(:message_id => hash[:message_id], :newsgroup => @newsgroup)
 									yield true
 								}
@@ -190,7 +190,7 @@ class WordPressBackend
 				if hash[:user_email]
 					@db.query(prepare("SELECT comment_ID
 						FROM #{table_name('comments')}
-						WHERE comment_approved='1' AND comment_author_email='%s' LIMIT 1", hash[:user_email]), &finish)
+						WHERE comment_approved='1' AND comment_author_email='%s' LIMIT 1", hash[:user_email])).callback(&finish)
 				else
 					finish.call(nil)
 				end
@@ -201,12 +201,12 @@ class WordPressBackend
 				@db.query(prepare("
 					SELECT comment_post_ID
 					FROM #{table_name('comments')}
-					WHERE comment_ID=%d LIMIT 1", result['id'].to_i)) { |result|
-					hash[:post_parent] = result.fetch_row[0].to_i
+					WHERE comment_ID=%d LIMIT 1", result['id'].to_i)).callback { |result|
+					hash[:post_parent] = result.first['comment_post_ID']
 					insert.call(hash)
 				}
 			else
-				hash[:post_parent] = result['id'].to_i
+				hash[:post_parent] = result['id']
 				insert.call(hash)
 			end
 		}
@@ -221,8 +221,8 @@ class WordPressBackend
 		@db.query("
 			SELECT
 				MIN(UNIX_TIMESTAMP(post_date_gmt)) as start
-			FROM #{table_name('posts')}") { |result|
-			if (result = result.fetch_row) && Time.at(result[0].to_i) >= datetime
+			FROM #{table_name('posts')}").callback { |result|
+			if (result = result.first) && Time.at(result['start']) >= datetime
 				yield @newsgroup
 			else
 				yield nil
@@ -235,9 +235,9 @@ class WordPressBackend
 			update_newsgroup_meta
 			@db.query(prepare(
 				article_query({}, true, false) +
-				' AND datestamp >= %d', datetime.to_i)) { |result|
+				' AND datestamp >= %d', datetime.to_i)).callback { |result|
 				ids = []
-				result.each_hash { |row| ids << row['message_id'] }
+				result.each { |row| ids << row['message_id'] }
 				yield ids
 			}
 		else
@@ -263,11 +263,11 @@ class WordPressBackend
 	def over(g, args)
 		@db.query(article_query(args.merge(:newsgroup => g))) { |result|
 			request = Multi.new
-			result.each_hash {|h|
+			result.each {|h|
 				request << lambda {|&cb| format_hash(h) { |head|
 					cb.call(head.merge(:bytes => h['post_content'].force_encoding('binary').length,
 					                   :lines => h['post_content'].split(/\n/).length,
-					                   :article_number => h['article_number'].to_i,
+					                   :article_number => h['article_number'],
 					                   :content_type => 'text/html; charset=utf-8'))
 				} }
 			}
@@ -294,16 +294,16 @@ class WordPressBackend
 				LEFT JOIN
 				#{table_name('terms')} USING(term_id)
 			WHERE
-				object_id=%d", article['id']), &blk)
+				object_id=%d", article['id'])).callback(&blk)
 	end
 
 	def one_article(g, args, head=true, body=true)
-		@db.query(article_query(args.merge(:newsgroup => g, :limit => 1), head, body)) { |result|
-			if (result = result.fetch_hash)
-				hash = {:article_number => result['article_number'].to_i}
+		@db.query(article_query(args.merge(:newsgroup => g, :limit => 1), head, body)).callback { |result|
+			if (result = result.first)
+				hash = {:article_number => result['article_number']}
 				hash.merge!(:body => format_body(result['post_content'])) if body
 				hash[:head] = {
-					:message_id   => result['message_id'].force_encoding('utf-8'),
+					:message_id   => result['message_id']
 					:content_type => 'text/html; charset=utf-8' # HTML-only is evil, but xnntp generates Markdown for us
 				}
 				if head
@@ -382,9 +382,9 @@ class WordPressBackend
 			FROM
 				#{table_name('newsgroup_meta')}
 			WHERE
-				id=%d AND tbl='%s'", id, table_name(table))) { |result|
-			if (result = result.fetch_row)
-				yield result[0]
+				id=%d AND tbl='%s'", id, table_name(table))).callback { |result|
+			if (result = result.first)
+				yield result['message_id']
 			else
 				yield nil
 			end
@@ -392,7 +392,6 @@ class WordPressBackend
 	end
 
 	def format_hash(hash)
-		# Forcing encodings because mysqlplus lies to us about the encoding
 		uri = @homeuri.dup
 		if hash['tbl'] == table_name('posts')
 			uri.query = "p=#{hash['id']}"
@@ -402,9 +401,9 @@ class WordPressBackend
 		end
 		h = ({
 			:newsgroups => [@newsgroup],
-			:message_id => hash['message_id'].force_encoding('utf-8'),
-			:from       => "\"#{hash['display_name']}\" <#{hash['user_email']}>".force_encoding('utf-8'),
-			:subject    => hash['post_title'].force_encoding('utf-8'),
+			:message_id => hash['message_id'],
+			:from       => "\"#{hash['display_name']}\" <#{hash['user_email']}>",
+			:subject    => hash['post_title'],
 			:date       => Time.at(hash['datestamp'].to_i),
 			:content_location => uri
 		})
@@ -428,7 +427,7 @@ class WordPressBackend
 
 	def format_body(body)
 		# This function mostly does the auto-p from wordpress
-		body.force_encoding('utf-8') << "\n" # Force encoding because mysqlplus lies
+		body << "\n"
 		allblocks = '(?:table|thead|tfoot|caption|col|colgroup|tbody|tr|td|th|div|dl|dd|dt|ul|ol|li|pre|select|option|form|map|area|blockquote|address|math|style|input|p|h[1-6]|hr|fieldset|legend|section|article|aside|hgroup|header|footer|nav|figure|figcaption|details|menu|summary)'
 		body.gsub!(/(<#{allblocks}[^>]*>)/, "\n\\1")
 		body.gsub!(/(<\/#{allblocks}>)/, "\\1\n\n")
@@ -461,8 +460,8 @@ class WordPressBackend
 			FROM
 				#{table_name('newsgroup_meta')}
 			WHERE
-				newsgroup='%s' LIMIT 1", g)) { |result|
-			blk.call(result.fetch_hash.inject({}) {|c, (k, v)|
+				newsgroup='%s' LIMIT 1", g)).callback { |result|
+			blk.call(result.first.inject({}) {|c, (k, v)|
 				c[k.intern] = v.to_i
 				c
 			})
@@ -496,8 +495,8 @@ class WordPressBackend
 				isNULL(b.id) AND comment_approved='1' AND
 				post_type='post' AND post_status='publish'
 			)
-			ORDER BY datestamp, ID) t", HOST, HOST)) { |result|
-			values = result.all_hashes.map {|row|
+			ORDER BY datestamp, ID) t", HOST, HOST)).callback { |result|
+			values = result.map {|row|
 				Util::new_article(:message_id => row['message_id'], :newsgroup => @newsgroup)
 				prepare("(%d, '%s', '%s', '%s')", row['ID'], row['tbl'], row['message_id'], @newsgroup)
 			}.join(', ')
@@ -523,7 +522,7 @@ class WordPressBackend
 	end
 
 	def prepare(sql, *args)
-		args.map! {|arg| arg.is_a?(String) ? Mysql::escape_string(arg) : arg }
+		args.map! {|arg| arg.is_a?(String) ? @db.escape(arg) : arg }
 		sql % args
 	end
 end
