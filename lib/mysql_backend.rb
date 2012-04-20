@@ -1,11 +1,14 @@
 # encoding: utf-8
-require 'em-mysqlplus'
+require 'mysql2/em'
 require 'time'
 require 'util'
+require 'connection_pool'
 
 class MysqlBackend
 	def initialize(config)
-		@db = EventMachine::MySQL.new(config[:db].merge(:encoding => 'utf8'))
+		@db = EventMachine::ConnectionPool.new do
+			Mysql2::EM::Client.new(config[:db].merge(:encoding => 'utf8'))
+		end
 		@readonly = config[:readonly]
 		query("
 			CREATE TABLE IF NOT EXISTS newsgroups(
@@ -52,7 +55,7 @@ class MysqlBackend
 			FROM newsgroups
 			WHERE newsgroup='%s'
 			LIMIT 1", g) {|result|
-			if (result = result.fetch_hash)
+			if (result = result.first)
 				yield format_hash(result)
 			else
 				yield nil
@@ -66,7 +69,7 @@ class MysqlBackend
 			FROM newsgroups
 			WHERE newsgroup='%s'
 			LIMIT 1", g) {|result|
-			if (result = result.fetch_hash)
+			if (result = result.first)
 				yield result['moderated'].to_i != 0
 			else
 				yield nil
@@ -89,7 +92,7 @@ class MysqlBackend
 				newsgroup='%s' #{range_to_sql('article_number', range)}
 			ORDER BY article_number", g) { |result|
 			list = []
-			result.each {|row| list << row[0].force_encoding('utf-8') }
+			result.each {|row| list << row['article_number'] }
 			blk.call(list)
 		}
 	end
@@ -105,8 +108,8 @@ class MysqlBackend
 		ORDER BY
 			article_number DESC
 		LIMIT 1", g, current.to_i) { |result|
-			yield(if (result = result.fetch_row)
-				{:article_number => result[0].to_i}
+			yield(if (result = result.first)
+				{:article_number => result['article_number']}
 			end)
 		}
 	end
@@ -122,8 +125,8 @@ class MysqlBackend
 		ORDER BY
 			article_number ASC
 		LIMIT 1", g, current.to_i) { |result|
-			yield(if (result = result.fetch_row)
-				{:article_number => result[0].to_i}
+			yield(if (result = result.first)
+				{:article_number => result['article_number']}
 			end)
 		}
 	end
@@ -152,7 +155,7 @@ class MysqlBackend
 		Util::new_article(:message_id => m[:message_id].decoded,
 		                  :newsgroup => m[:newsgroups].decoded.split(/,\s*/).first)
 		headers = m.header.fields.map { |head|
-			unless [:message_id, :'message-id', :subject, :from, :date, :references].index(head.name.downcase.intern)
+			unless [:message_id, :'message-id', :subject, :from, :date, :references].index(head.name.to_s.downcase.intern)
 				"#{head.name}: #{head.decoded}"
 			end
 		}.compact.join("\r\n")
@@ -166,9 +169,10 @@ class MysqlBackend
 			WHERE newsgroup IN (#{groups})
 			GROUP BY newsgroup") {|nums|
 			request = Multi.new
-			nums.all_hashes.each {|num|
+			nums.each {|num|
 				# Skip any moderated groups we don't manage
 				next if num['moderated'].to_i != 0 && num['nntp'].split('/',2)[0] != HOST + (PORT != 119 ? ":#{PORT}" : '')
+				time = m[:date].to_s != '' ? Time.parse(m[:date].to_s) : Time.now
 				# XXX: There's an ugly race condition on the article number...
 				request << lambda {|&cb|
 					query("INSERT INTO meta VALUES('%s', %d, '%s', %d)",
@@ -179,7 +183,7 @@ class MysqlBackend
 				}
 				request << lambda {|&cb|
 					query("INSERT INTO articles VALUES('%s', '%s', '%s', %d, '%s', '%s', '%s')",
-					m[:message_id], m[:subject], m[:from], Time.parse(m[:date].to_s),
+					m[:message_id], m[:subject], m[:from], time,
 					m[:references], headers, m.body) {
 						cb.call
 					}
@@ -204,7 +208,7 @@ class MysqlBackend
 			FROM articles LEFT JOIN meta USING(message_id)
 			WHERE approved=1 AND date >= %d
 			GROUP BY newsgroup", datetime) { |result|
-			yield ((result.all_hashes || []).map {|h| h['newsgroup']})
+			yield ((result.to_a || []).map {|h| h['newsgroup']})
 		}
 	end
 
@@ -213,7 +217,7 @@ class MysqlBackend
 			SELECT newsgroup, message_id
 			FROM articles LEFT JOIN meta USING(message_id)
 			WHERE approved=1 AND date >= %d", datetime) { |result|
-			yield ((result.all_hashes || []) \
+			yield ((result.to_a || []) \
 				.select {|h| wildmats.match(h['newsgroup'])} \
 				.map {|h| h['message_id']})
 		}
@@ -239,7 +243,7 @@ class MysqlBackend
 		stmt << prepare(" AND message_id='%s'", args[:message_id]) if args[:message_id]
 		stmt << range_to_sql('article_number', args[:article_number])
 		query(stmt) {|result|
-			yield result.all_hashes.map {|h| format_hash(h, g)}
+			yield result.map {|h| format_hash(h, g)}
 		}
 	end
 
@@ -267,7 +271,7 @@ class MysqlBackend
 		stmt << ' LIMIT 1'
 
 		query(stmt) {|result|
-			if (result = result.fetch_hash)
+			if (result = result.first)
 				h = {:head => format_hash(result, g)}
 				h[:article_number] = h[:head][:article_number]
 				h[:head].delete(:article_number)
@@ -286,7 +290,7 @@ class MysqlBackend
 		}
 	end
 
-	def get_group_stats(g, extra=false, &blk)
+	def get_group_stats(g, extra=false)
 		query("
 			SELECT
 				newsgroup,
@@ -301,14 +305,14 @@ class MysqlBackend
 				#{prepare("AND newsgroup='%s'", g) if g}
 			GROUP BY newsgroup
 			#{"LIMIT 1" if g}") { |result|
-			result = result.all_hashes.map {|h| h.inject({}) {|c, (k, v)|
+			result = (result || []).map {|h| h.inject({}) {|c, (k, v)|
 				v = v.to_i unless k == 'newsgroup' || k == 'title'
 				v = (v != 0) if k == 'moderated'
 				c[k.intern] = v
 				c
 			} }
 			if g
-				yield result.first || {:total => 0, :max => 0, :min => 0, :newsgroup => g}
+				yield (result.first || {:total => 0, :max => 0, :min => 0, :newsgroup => g})
 			else
 				yield result
 			end
@@ -319,7 +323,7 @@ class MysqlBackend
 		r = h.inject({}) {|c, (k, v)|
 			next c if v.to_s == ''
 			k = k.intern
-			c[k] = v.force_encoding('utf-8')
+			c[k] = v
 			c
 		}
 		r[:newsgroups] = (r[:newsgroups].to_s.split(/,\s*/) + [g]).uniq.compact
@@ -343,14 +347,15 @@ class MysqlBackend
 	end
 
 	def query(sql, *args, &cb)
-		df = @db.query(prepare(sql, *args))
-		df.callback &cb
-		df.errback {|e| LOG.error e.inspect}
-		df
+		@db.query(prepare(sql, *args)) {|df|
+				  df.callback &cb
+				  df.errback {|e| LOG.error e.inspect}
+		}
+		EventMachine::DefaultDeferrable.new
 	end
 
 	def prepare(sql, *args)
-		args.map! {|arg| arg.is_a?(String) ? Mysql::escape_string(arg) : arg }
+		args.map! {|arg| arg.is_a?(String) ? Mysql2::Client.escape(arg) : arg }
 		sql % args
 	end
 end
