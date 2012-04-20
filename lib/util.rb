@@ -28,7 +28,7 @@ module Util
 	end
 
 	def backend(group=@current_group)
-		BACKENDS.each do |pattern, backend|
+		NNTPServer::BACKENDS.each do |pattern, backend|
 			return backend if pattern === group
 		end
 		Class.new {
@@ -51,7 +51,7 @@ module Util
 
 	def each_backend(&blk)
 		request = Multi.new
-		BACKENDS.each { |pattern, backend|
+		NNTPServer::BACKENDS.each { |pattern, backend|
 			request << lambda {|&cb| blk.call(backend, &cb) }
 		}
 		request
