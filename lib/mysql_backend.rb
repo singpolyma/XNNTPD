@@ -278,9 +278,9 @@ class MysqlBackend
 				h[:body] = h[:head][:body]
 				h[:head].delete(:body)
 				h[:head].merge!(Hash[h[:head][:headers].to_s.split(/\r?\n/).map {|v|
-					v = v.split(/:\s*/, 2)
-					next if v[1].to_s == ''
-					v
+					k, v = v.split(/:\s*/, 2)
+					next if v.to_s == ''
+					[k.gsub(/-/,'_').downcase.intern, v]
 				}])
 				h[:head].delete(:headers)
 				yield h
