@@ -608,7 +608,7 @@ class NNTPServer < SimpleProtocolServer
 					if rtrn
 						f.ready_with(yield hash_to_mime(rtrn))
 					else
-						f.ready_wih('423 No article with that number')
+						f.ready_with('423 No article with that number')
 					end
 				}
 			}
