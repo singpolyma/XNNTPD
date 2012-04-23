@@ -23,8 +23,8 @@ module Util
 
 	def new_article(m)
 		DB.query("INSERT INTO messages (message_id,newsgroup) VALUES(
-		          '#{Mysql::escape_string(m[:message_id])}',
-		          '#{Mysql::escape_string(m[:newsgroup])}')") if m[:message_id]
+		          '#{Mysql2::Client::escape(m[:message_id].to_s)}',
+		          '#{Mysql2::Client::escape(m[:newsgroup].to_s)}')") if m[:message_id]
 	end
 
 	def backend(group=@current_group)
@@ -143,7 +143,7 @@ module Util
 			keys = keys.select {|p| p.algorithm == 1 && p.fingerprint =~ /#{sig.issuer}$/i } if keys # We only support RSA for now
 			# TODO: check self-sig and expiration/revocation on the matching key
 			if keys
-				DB.query("INSERT IGNORE INTO `keys` VALUES('#{keys.first.fingerprint.upcase}', '#{Mysql::escape_string(keys.first.to_s.force_encoding('binary'))}')")
+				DB.query("INSERT IGNORE INTO `keys` VALUES('#{keys.first.fingerprint.upcase}', '#{Mysql2::Client::escape(keys.first.to_s.force_encoding('binary'))}')")
 				head = headers.map {|h| "#{h}: #{m[h] ? m[h].decoded : ''}\r\n"}.join
 				data = OpenPGP::Packet::LiteralData.new(:format => :u, :data =>
 					"X-Signed-Headers: #{headers.join(',')}\r\n#{head}\r\n#{m.body.decoded}\r\n")
@@ -160,9 +160,9 @@ module Util
 		if keys
 			finish.call(keys)
 		else
-			DB.query("SELECT `key` FROM `keys` WHERE fingerprint LIKE '%#{sig.issuer.upcase}'") { |r|
-				if key = r.fetch_row
-					finish.call(OpenPGP::Message.parse(key[0]))
+			DB.query("SELECT `key` FROM `keys` WHERE fingerprint LIKE '%#{sig.issuer.upcase}'").callback { |r|
+				if key = r.first
+					finish.call(OpenPGP::Message.parse(key['key']))
 				else
 					each_keyserver((sig.hashed_subpackets.map {|p|
 						p.is_a?(OpenPGP::Packet::Signature::PreferredKeyServer) ? p.body : nil

@@ -7,7 +7,7 @@ require 'util'
 
 class WordPressBackend
 	def initialize(config)
-		@db = Mysql2::EM::Client.new(config[:db].merge(:encoding => 'utf8'))
+		@db = EventMachine::ConnectionPool.new { Mysql2::EM::Client.new(config[:db].merge(:encoding => 'utf8')) }
 		@table_prefix = config[:table_prefix]
 		@newsgroup    = config[:newsgroup]
 		@readonly     = config[:readonly]
@@ -522,7 +522,7 @@ class WordPressBackend
 	end
 
 	def prepare(sql, *args)
-		args.map! {|arg| arg.is_a?(String) ? @db.escape(arg) : arg }
+		args.map! {|arg| arg.is_a?(String) ? Mysql2::Client::escape(arg) : arg }
 		sql % args
 	end
 end

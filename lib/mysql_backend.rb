@@ -347,15 +347,14 @@ class MysqlBackend
 	end
 
 	def query(sql, *args, &cb)
-		@db.query(prepare(sql, *args)) {|df|
-				  df.callback &cb
-				  df.errback {|e| LOG.error e.inspect}
-		}
-		EventMachine::DefaultDeferrable.new
+		df = @db.query(prepare(sql, *args))
+		df.callback &cb
+		df.errback {|e| LOG.error e.inspect}
+		df
 	end
 
 	def prepare(sql, *args)
-		args.map! {|arg| arg.is_a?(String) ? Mysql2::Client.escape(arg) : arg }
+		args.map! {|arg| arg.is_a?(String) ? Mysql2::Client::escape(arg) : arg }
 		sql % args
 	end
 end

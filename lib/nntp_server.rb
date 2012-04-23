@@ -243,9 +243,9 @@ class NNTPServer < SimpleProtocolServer
 											m.transport_encoding = '8bit'
 											m.ready_to_send!
 											q = DB.query("INSERT INTO messages (message_id, post_peer, encoded) VALUES
-											         ('#{Mysql::escape_string(m[:message_id].decoded)}',
-											          '#{Mysql::escape_string(owner[:nntp].to_s)}',
-											          '#{Mysql::escape_string(m.encoded)}')") {
+											         ('#{Mysql2::Client::escape(m[:message_id].decoded)}',
+											          '#{Mysql2::Client::escape(owner[:nntp].to_s)}',
+											          '#{Mysql2::Client::escape(m.encoded)}')").callback {
 												cb.call(true)
 											}
 											q.errback {|e| cb.call(false) }
@@ -558,8 +558,8 @@ class NNTPServer < SimpleProtocolServer
 			end
 			# No exceptions were thrown if we get here
 			DB.query("INSERT INTO messages (message_id,encoded) VALUES(
-			          '#{Mysql::escape_string(m[:message_id])}',
-			          '#{Mysql::escape_string(m.encoded)}')")
+			          '#{Mysql2::Client::escape(m[:message_id])}',
+			          '#{Mysql2::Client::escape(m.encoded)}')")
 			EventMachine::DefaultDeferrable.new
 		rescue Exception
 			cb.call($!.message)

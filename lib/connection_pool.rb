@@ -12,17 +12,24 @@ module EventMachine
 		end
 
 		def method_missing(m, *args)
+			df = DefaultDeferrable.new
 			acquire { |conn|
 				begin
-					df = conn.__send__(m, *args)
-					df.callback { release(conn) }
-					df.errback { release(conn) }
-					yield df
+					idf = conn.__send__(m, *args)
+					idf.callback { |*a|
+						df.succeed(*a)
+						release(conn) 
+					}
+					idf.errback { |*a|
+						df.fail(*a)
+						release(conn)
+					}
 				rescue Exception
 					release(conn)
 					yield $!
 				end
 			}
+			df
 		end
 
 		protected

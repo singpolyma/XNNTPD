@@ -1,7 +1,8 @@
 # encoding: utf-8
 require 'uri'
 
-require 'em-mysqlplus'
+require 'eventmachine'
+require 'mysql2/em'
 
 require 'multi'
 require 'util'
@@ -70,16 +71,16 @@ def send_ihave(db, peer, m)
 		(m[:mime][:path].decoded == uri.host || \
 		m[:mime][:path].decoded == "#{uri.host}:#{uri.port}")
 		db.query("INSERT INTO messages_sent VALUES
-					('#{Mysql::escape_string(m[:message_id])}',
-					 '#{Mysql::escape_string(peer)}')")
+					('#{Mysql2::Client::escape(m[:message_id])}',
+					 '#{Mysql2::Client::escape(peer)}')")
 		return nil
 	end
 	EventMachine::connect(uri.host, uri.port || 119, IHAVEClient) { |nntp|
 		nntp.command(:ihave, m) { |success|
 			if success # We sent the message, record that fact
 				db.query("INSERT INTO messages_sent VALUES
-							('#{Mysql::escape_string(m[:message_id])}',
-							 '#{Mysql::escape_string(peer)}')")
+							('#{Mysql2::Client::escape(m[:message_id])}',
+							 '#{Mysql2::Client::escape(peer)}')")
 			end
 		}
 	}
@@ -91,8 +92,8 @@ def send_post(db, peer, m)
 		nntp.command(:post, m) { |success|
 			if success # We sent the message, record that fact
 				db.query("DELETE FROM messages WHERE
-				          post_peer='#{Mysql::escape_string(peer)}' AND
-				          message_id='#{Mysql::escape_string(m[:message_id])}'")
+				          post_peer='#{Mysql2::Client::escape(peer)}' AND
+				          message_id='#{Mysql2::Client::escape(m[:message_id])}'")
 			end
 		}
 	}
@@ -118,8 +119,8 @@ def process_peers(peers, db, log, time=60)
 			request << lambda {|&cb|
 				db.query("SELECT messages.message_id,newsgroup,encoded FROM messages LEFT JOIN messages_sent
 				          ON messages.message_id=messages_sent.message_id AND messages_sent.server='#{peer}'
-				          WHERE isNULL(server) AND isNULL(post_peer) LIMIT 20") { |result|
-					result.all_hashes.each {|r|
+				          WHERE isNULL(server) AND isNULL(post_peer) LIMIT 20").callback { |result|
+					result.each {|r|
 						get_article(r) {|m|
 							log.info "IHAVE #{m[:message_id]} to #{peer}"
 							send_ihave(db, peer, m)
@@ -131,8 +132,8 @@ def process_peers(peers, db, log, time=60)
 		}
 		request << lambda {|&cb|
 			db.query('SELECT message_id,newsgroup,encoded,post_peer
-			          FROM messages WHERE NOT isNULL(post_peer)') { |result|
-				result.all_hashes.each {|r|
+			          FROM messages WHERE NOT isNULL(post_peer)').callback { |result|
+				result.each {|r|
 					get_article(r) {|m|
 						log.info "POST #{m[:message_id]} to #{peer}"
 						send_post(db, r['post_peer'], m)
